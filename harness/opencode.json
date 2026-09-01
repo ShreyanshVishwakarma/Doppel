@@ -1,0 +1,12 @@
+{
+  "model": "opencode/muse-spark-1.2-contributor-free",
+  "mcpServers": {
+    "solari": {
+      "command": "npx",
+      "args": ["-y", "@solarisdk/mcp"],
+      "env": {
+        "SOLARI_API_KEY": "${SOLARI_API_KEY}"
+      }
+    }
+  }
+}
