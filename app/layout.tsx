@@ -15,10 +15,33 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+
 export const metadata: Metadata = {
-  title: "Doppel — Your Professional Doppelgänger",
+  metadataBase: new URL(appUrl),
+  title: {
+    default: "Doppel — Your Professional Doppelgänger",
+    template: "%s — Doppel",
+  },
   description:
     "An autonomous AI that runs your professional life — emails, LinkedIn, Twitter, job applications, recruiter replies. You live, Doppel works.",
+  openGraph: {
+    type: "website",
+    siteName: "Doppel",
+    title: "Doppel — Your Professional Doppelgänger",
+    description:
+      "An autonomous AI that runs your professional life — emails, LinkedIn, Twitter, job applications, recruiter replies. You live, Doppel works.",
+    url: appUrl,
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Doppel — Your Professional Doppelgänger",
+    description:
+      "An autonomous AI that runs your professional life — emails, LinkedIn, Twitter, job applications, recruiter replies. You live, Doppel works.",
+  },
+  icons: {
+    icon: [{ url: "/icon.svg", type: "image/svg+xml" }],
+  },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

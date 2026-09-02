@@ -1,5 +1,16 @@
 {
-  "model": "opencode/muse-spark-1.2-contributor-free",
+  "$schema": "https://opencode.ai/config.json",
+  "model": "opencode/mimo-v2.5-free",
+  "mcp": {
+    "solari": {
+      "type": "local",
+      "command": ["npx", "-y", "@solarisdk/mcp"],
+      "enabled": true,
+      "environment": {
+        "SOLARI_API_KEY": "${SOLARI_API_KEY}"
+      }
+    }
+  },
   "mcpServers": {
     "solari": {
       "command": "npx",

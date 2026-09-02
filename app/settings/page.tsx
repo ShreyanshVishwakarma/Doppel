@@ -37,7 +37,7 @@ export default function SettingsPage() {
 
   const [creating, setCreating] = useState<string | null>(null);
   const [profilesMsg, setProfilesMsg] = useState<string | null>(null);
-  const [solariList, setSolariList] = useState<Array<{ id: string; name: string }> | null>(null);
+  const [solariList, setSolariList] = useState<Array<{ id: string; name: string; editorStatus?: string; editorError?: string }> | null>(null);
 
   useEffect(() => {
     if (!profile) return;
@@ -50,7 +50,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     if (!isAuthenticated) return;
-    fetch("/api/profiles").then(r=>r.json()).then(d=>{ if(d.solarProfiles || d.solariProfiles) setSolariList(d.solariProfiles ?? d.solarProfiles); if(d.solarProfiles) setSolariList(d.solarProfiles); if(d.solariProfiles) setSolariList(d.solariProfiles); }).catch(()=>{});
+    fetch("/api/profiles").then(r=>r.json()).then(d=>{ setSolariList(d.solariProfiles ?? d.solarProfiles ?? []); }).catch(()=>{});
   }, [isAuthenticated, browserProfiles]);
 
   if (!isAuthenticated) return <div className="min-h-screen grid place-items-center p-6 text-sm text-zinc-900">Sign in to edit settings</div>;
@@ -140,6 +140,13 @@ export default function SettingsPage() {
                           {mapped ? <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${isActive ? "bg-emerald-600 text-white" : "bg-amber-500 text-white"}`}>{mapped.status}</span> : <span className="rounded-full bg-zinc-200 border border-zinc-300 px-2 py-0.5 text-[10px] font-bold text-zinc-800">not connected</span>}
                         </div>
                         <div className="mt-1 text-xs leading-5 text-zinc-800">{pl.desc}</div>
+                        {mapped && (() => {
+                          const sp = (solariList ?? []).find((s) => s.id === mapped.solariProfileId);
+                          if (sp?.editorStatus === "error") {
+                            return <div className="mt-1 rounded-lg border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs font-semibold text-amber-900">⚠ Last editor save failed: {sp.editorError ?? "editor died"} — reopen the Solari editor, log in, and Save again.</div>;
+                          }
+                          return null;
+                        })()}
                         {mapped && <div className="mt-1 font-mono text-xs font-medium text-zinc-800">→ {mapped.solariProfileId} • last {new Date(mapped.lastUsedAt).toLocaleDateString()}</div>}
                         <div className="mt-2 flex flex-wrap gap-2">
                           {!mapped ? (

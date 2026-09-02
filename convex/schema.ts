@@ -50,7 +50,9 @@ export default defineSchema({
     solariProfileId: v.string(), // prof_xxx
     status: v.union(v.literal("active"), v.literal("needs_reauth")),
     lastUsedAt: v.number(),
-  }).index("by_user_platform", ["userId", "platform"]),
+  })
+    .index("by_user_platform", ["userId", "platform"])
+    .index("by_userId", ["userId"]),
 
   // Sandbox harness sessions — one per prompt. Each is a Solari Sandbox
   // that boots from the opencode harness snapshot and streams logs.

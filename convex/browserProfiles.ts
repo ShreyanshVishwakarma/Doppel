@@ -40,8 +40,10 @@ export const listMine = query({
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return [];
-    const all = await ctx.db.query("browserProfiles").collect();
-    return all.filter((p) => p.userId === identity.subject);
+    return await ctx.db
+      .query("browserProfiles")
+      .withIndex("by_userId", (q) => q.eq("userId", identity.subject))
+      .collect();
   },
 });
 

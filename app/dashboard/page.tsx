@@ -17,6 +17,28 @@ function timeAgo(ms: number) {
 }
 
 function cleanTraceText(t: string) {
+  // LLM tool-call events streamed from opencode
+  const tool = t.match(/(FAILED — )?solari_(browser_\w+)\s*(\{.*)?$/);
+  if (tool) {
+    const fail = tool[1] ? "✗ " : "";
+    const name = tool[2];
+    let detail = "";
+    try { detail = tool[3] ? String(JSON.parse(tool[3]).url ?? JSON.parse(tool[3]).selector ?? JSON.parse(tool[3]).key ?? JSON.parse(tool[3]).profileId ?? "") : ""; } catch {}
+    const shortUrl = detail.replace(/^https?:\/\/(www\.)?/, "").slice(0, 60);
+    const verb: Record<string, string> = {
+      solari_browser_create: "Opening browser" + (detail ? " with profile " + detail.slice(0, 20) : " (no profile)"),
+      solari_browser_navigate: "Opening " + (shortUrl || "page"),
+      solari_browser_read_page: "Reading page",
+      solari_browser_screenshot: "Taking screenshot",
+      solari_browser_click: "Clicking " + (shortUrl || "element"),
+      solari_browser_type: "Typing…",
+      solari_browser_key: "Pressing " + (detail || "key"),
+      solari_browser_evaluate: "Running page script",
+      solari_browser_close: "Closing browser",
+      solari_browser_replay_url: "Fetching replay",
+    };
+    return fail + (verb[name] ?? name);
+  }
   // hide raw JSON noise
   if (t.includes('"needed"') && t.includes('"allActive"')) {
     try {
@@ -54,11 +76,11 @@ function TraceDot({ type, active }: { type: string; active?: boolean }) {
 }
 
 function statusMeta(s: string) {
-  if (s === "completed") return { label: "Completed", dot: "bg-emerald-500", pill: "bg-emerald-50 text-emerald-700 border-emerald-200" };
-  if (s === "running") return { label: "Running", dot: "bg-amber-500 animate-pulse", pill: "bg-amber-50 text-amber-800 border-amber-200" };
-  if (s === "failed") return { label: "Failed", dot: "bg-red-500", pill: "bg-red-50 text-red-700 border-red-200" };
-  if (s === "paused") return { label: "Needs action", dot: "bg-sky-500", pill: "bg-sky-50 text-sky-700 border-sky-200" };
-  return { label: s, dot: "bg-zinc-400", pill: "bg-zinc-100 text-zinc-600 border-zinc-200" };
+  if (s === "completed") return { label: "Completed", dot: "bg-emerald-600", pill: "bg-stone-100 text-stone-600 border-stone-200" };
+  if (s === "running") return { label: "Running", dot: "bg-amber-600 animate-pulse", pill: "bg-stone-100 text-stone-700 border-stone-200" };
+  if (s === "failed") return { label: "Failed", dot: "bg-red-500/80", pill: "bg-stone-100 text-stone-600 border-stone-200" };
+  if (s === "paused") return { label: "Needs action", dot: "bg-sky-600", pill: "bg-stone-100 text-stone-700 border-stone-200" };
+  return { label: s, dot: "bg-stone-400", pill: "bg-stone-100 text-stone-600 border-stone-200" };
 }
 
 export default function DashboardPage() {
@@ -72,6 +94,21 @@ export default function DashboardPage() {
   const [runError, setRunError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showTech, setShowTech] = useState(false);
+  const [stopping, setStopping] = useState(false);
+
+  async function handleStop() {
+    if (!selected || stopping) return;
+    setStopping(true);
+    try {
+      const res = await fetch("/api/sessions/kill", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: selected._id }) });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        setRunError(d.error ?? "Failed to stop session");
+      }
+    } finally {
+      setStopping(false);
+    }
+  }
 
   const selected = useMemo(() => {
     if (!sessions?.length) return null;
@@ -141,7 +178,7 @@ export default function DashboardPage() {
           <Link href="/" className="flex items-center gap-2">
             <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-zinc-900 text-xs font-bold text-white">D.</div>
             <span className="text-sm font-bold tracking-tight text-zinc-900">Doppel</span>
-            {runningCount > 0 && <span className="ml-2 hidden sm:inline-flex items-center gap-1.5 rounded-full bg-amber-50 border border-amber-200 px-2.5 py-1 text-xs font-semibold text-amber-800"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500" />{runningCount} running</span>}
+            {runningCount > 0 && <span className="tnum ml-2 hidden sm:inline-flex items-center gap-1.5 rounded-full bg-stone-100 border border-stone-200 px-2.5 py-1 text-xs font-medium text-stone-700"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-600" />{runningCount} running</span>}
           </Link>
           <div className="flex items-center gap-2 text-xs">
             <Link href="/settings" className="rounded-full border bg-white px-3 py-1.5 font-medium text-zinc-700 hover:bg-zinc-50 hidden sm:inline-flex">Settings</Link>
@@ -156,7 +193,7 @@ export default function DashboardPage() {
         <div className="flex w-full lg:w-[360px] shrink-0 flex-col rounded-2xl border bg-white shadow-sm overflow-hidden max-h-[calc(100vh-56px-32px)]">
           <div className="flex items-center justify-between border-b bg-zinc-50/60 px-4 py-3">
             <h2 className="text-xs font-semibold tracking-widest text-zinc-500">SESSIONS</h2>
-            <span className="rounded-full bg-white border px-2 py-0.5 text-xs font-medium text-zinc-600">{(sessions ?? []).length}</span>
+            <span className="tnum rounded-full bg-white border px-2 py-0.5 text-xs font-medium text-zinc-600">{(sessions ?? []).length}</span>
           </div>
 
           <div className="flex-1 overflow-auto p-3 space-y-3 min-h-[240px]">
@@ -180,7 +217,7 @@ export default function DashboardPage() {
                   <button
                     key={s._id}
                     onClick={() => setSelectedId(s._id)}
-                    className={`group w-full text-left rounded-xl border bg-white p-3.5 text-left transition ${isSel ? "border-zinc-900 shadow-sm ring-1 ring-zinc-900" : "border-zinc-200 hover:border-zinc-300 hover:bg-zinc-50/50"} ${isRunning ? "border-amber-200" : ""}`}
+                    className={`group w-full text-left rounded-xl border bg-white p-3.5 text-left transition ${isSel ? "border-zinc-900 shadow-sm ring-1 ring-zinc-900" : "border-zinc-200 hover:border-zinc-300 hover:bg-stone-50"} ${isRunning ? "border-amber-300" : ""}`}
                   >
                     <div className="flex items-center gap-2">
                       <span className={`h-2 w-2 rounded-full ${meta.dot}`} />
@@ -189,7 +226,7 @@ export default function DashboardPage() {
                     </div>
                     <div className="mt-2 line-clamp-2 text-sm font-medium leading-5 text-zinc-900">{s.prompt}</div>
                     <div className="mt-2 flex items-center gap-2 text-xs text-zinc-500">
-                      <span className="inline-flex items-center gap-1.5"><span className="rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-[11px]">{s.trace?.length ?? 0} steps</span>{s.browserSessionId ? <span className="text-emerald-600">• browser</span> : <span className="text-zinc-400">• no browser</span>}{s.replayUrl ? <span className="text-sky-600">• replay</span> : null}</span>
+                      <span className="inline-flex items-center gap-1.5"><span className="tnum rounded bg-stone-100 px-1.5 py-0.5 font-mono text-[11px]">{s.trace?.length ?? 0} steps</span>{s.browserSessionId ? <span className="text-emerald-700">• browser</span> : <span className="text-zinc-400">• no browser</span>}{s.replayUrl ? <span className="text-sky-700">• replay</span> : null}</span>
                     </div>
                   </button>
                 );
@@ -206,7 +243,7 @@ export default function DashboardPage() {
                 className="flex-1 rounded-xl border bg-white px-3.5 py-2.5 text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:border-zinc-900 focus:ring-2 focus:ring-zinc-900/10"
                 disabled={runState === "running"}
               />
-              <button type="submit" disabled={runState === "running" || !input.trim()} className="shrink-0 rounded-xl bg-zinc-900 px-5 text-sm font-semibold text-white disabled:opacity-40 hover:bg-black">
+              <button type="submit" disabled={runState === "running" || !input.trim()} className="shrink-0 rounded-xl bg-zinc-900 px-5 text-sm font-semibold text-white transition hover:bg-black active:scale-[0.98] disabled:opacity-40">
                 {runState === "running" ? "…" : "Run"}
               </button>
             </div>
@@ -238,7 +275,12 @@ export default function DashboardPage() {
                     <div className="flex flex-wrap items-center gap-2">
                       <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold ${selectedMeta!.pill}`}>{selectedMeta!.label}{selected.status === "running" ? <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" /> : null}</span>
                       <span className="text-xs text-zinc-500">{new Date(selected.createdAt).toLocaleString()} • {timeAgo(selected.createdAt)}</span>
-                      {selected.replayUrl && <a href={selected.replayUrl} target="_blank" className="ml-auto inline-flex items-center gap-1 rounded-full bg-zinc-900 px-3 py-1 text-xs font-semibold text-white hover:bg-black">▶ Replay</a>}
+                      {(selected.status === "running" || selected.status === "creating") && (
+                        <button onClick={handleStop} disabled={stopping} className="rounded-full border border-stone-300 bg-white px-3 py-1 text-xs font-semibold text-stone-700 transition hover:border-red-300 hover:bg-red-50 hover:text-red-700 active:scale-[0.98] disabled:opacity-40">
+                          {stopping ? "Stopping…" : "Stop"}
+                        </button>
+                      )}
+                      {selected.replayUrl && <a href={selected.replayUrl} target="_blank" className="ml-auto inline-flex items-center gap-1 rounded-full bg-zinc-900 px-3 py-1 text-xs font-semibold text-white transition hover:bg-black active:scale-[0.98]">▶ Replay</a>}
                     </div>
                     <h1 className="mt-3 text-[15px] font-semibold leading-6 text-zinc-900">{selected.prompt}</h1>
                     {selected.errorMessage && (
@@ -267,7 +309,7 @@ export default function DashboardPage() {
                     <h2 className="text-xs font-semibold tracking-widest text-zinc-500">TIMELINE</h2>
                     <div className="flex items-center gap-2">
                       {selected.status === "running" && <span className="h-2 w-2 animate-pulse rounded-full bg-amber-500" />}
-                      <span className="rounded-full bg-zinc-100 border px-2 py-0.5 text-xs font-medium text-zinc-600">{selected.trace?.length ?? 0} steps</span>
+                      <span className="tnum rounded-full bg-stone-100 border px-2 py-0.5 text-xs font-medium text-stone-600">{selected.trace?.length ?? 0} steps</span>
                       <span className="hidden sm:inline text-xs text-zinc-400">scroll for history</span>
                     </div>
                   </div>
@@ -337,6 +379,14 @@ export default function DashboardPage() {
                           let parsed: Record<string, unknown> | null = null;
                           try { parsed = JSON.parse(selected.response!); } catch { parsed = null; }
                           const isSent = parsed?.sent === true || (typeof parsed?.conclusion === "string" && String(parsed.conclusion).includes("Email sent"));
+                          if (parsed?.status === "completed" && typeof parsed.conclusion === "string" && !isSent) {
+                            return (
+                              <div className="rounded-xl border bg-emerald-50 border-emerald-200 p-4">
+                                <div className="flex items-center gap-2 text-emerald-800"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-600 text-white text-xs">✓</span><span className="text-xs font-bold tracking-widest">COMPLETED</span>{selected.replayUrl && <a href={selected.replayUrl} target="_blank" className="ml-auto text-xs font-semibold text-emerald-700 underline">Watch replay →</a>}</div>
+                                <div className="mt-2 text-sm leading-6 text-zinc-800 whitespace-pre-wrap">{String(parsed.conclusion).slice(0, 1200)}</div>
+                              </div>
+                            );
+                          }
                           if (parsed?.email && typeof parsed.email === "string") {
                             return (
                               <div className="rounded-xl border bg-emerald-50 border-emerald-200 p-4">
