@@ -36,7 +36,9 @@ export default function SettingsPage() {
   const [msg, setMsg] = useState<string | null>(null);
 
   const [creating, setCreating] = useState<string | null>(null);
+  const [loggingIn, setLoggingIn] = useState<string | null>(null);
   const [profilesMsg, setProfilesMsg] = useState<string | null>(null);
+  const [loginInfo, setLoginInfo] = useState<{ platform: string; url: string; sinceVersion: number | null; saved: boolean } | null>(null);
   const [solariList, setSolariList] = useState<Array<{ id: string; name: string; editorStatus?: string; editorError?: string }> | null>(null);
 
   useEffect(() => {
@@ -52,6 +54,26 @@ export default function SettingsPage() {
     if (!isAuthenticated) return;
     fetch("/api/profiles").then(r=>r.json()).then(d=>{ setSolariList(d.solariProfiles ?? d.solarProfiles ?? []); }).catch(()=>{});
   }, [isAuthenticated, browserProfiles]);
+
+  // Poll until the handoff's profile version bumps — that IS the save confirmation.
+  useEffect(() => {
+    if (!loginInfo || loginInfo.saved) return;
+    const t = setInterval(async () => {
+      try {
+        const d = await fetch("/api/profiles").then((r) => r.json());
+        const list: Array<{ id: string; version?: number; storageStateS3Key?: string }> = d.solariProfiles ?? [];
+        const target = (d.convexProfiles ?? []).find((c: { platform: string }) => c.platform === loginInfo.platform);
+        const sp = target ? list.find((p) => p.id === target.solariProfileId) : undefined;
+        if (!sp) return;
+        const saved = loginInfo.sinceVersion === null ? !!sp.storageStateS3Key : sp.version !== undefined && sp.version > loginInfo.sinceVersion;
+        if (saved) {
+          setLoginInfo({ ...loginInfo, saved: true });
+          setProfilesMsg(`Saved — ${loginInfo.platform} profile is logged in. Next run starts signed in.`);
+        }
+      } catch {}
+    }, 4000);
+    return () => clearInterval(t);
+  }, [loginInfo]);
 
   if (!isAuthenticated) return <div className="min-h-screen grid place-items-center p-6 text-sm text-zinc-900">Sign in to edit settings</div>;
   if (profile === undefined) return <div className="min-h-screen grid place-items-center p-6 text-sm text-zinc-900">Loading…</div>;
@@ -96,6 +118,25 @@ export default function SettingsPage() {
     finally { setSaving(false); }
   }
 
+  async function handleLogin(platform: string) {
+    setLoggingIn(platform);
+    setProfilesMsg(null);
+    setLoginInfo(null);
+    try {
+      const res = await fetch("/api/profiles/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ platform }) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed");
+      const info = { platform, url: data.url, sinceVersion: data.sinceVersion, saved: false };
+      setLoginInfo(info);
+      window.open(data.url, "_blank", "noopener");
+      setProfilesMsg(`Login page opened for ${platform} — sign in there, then click Save. This page detects when you're done.`);
+    } catch (e) {
+      setProfilesMsg(e instanceof Error ? e.message : "Login failed");
+    } finally {
+      setLoggingIn(null);
+    }
+  }
+
   async function handleCreateProfile(platform: string) {
     setCreating(platform);
     setProfilesMsg(null);
@@ -103,7 +144,7 @@ export default function SettingsPage() {
       const res = await fetch("/api/profiles", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ platform }) });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed");
-      setProfilesMsg(`✓ Profile created for ${platform}: ${data.solariProfileId.slice(0,16)}… Now open Solari console → Profiles → Open editor → log in → Save.`);
+      setProfilesMsg(`Profile created for ${platform}. Now click "Log in" below and sign in — no Solari account needed.`);
     } catch (e) { setProfilesMsg(e instanceof Error ? e.message : "Create failed"); }
     finally { setCreating(null); }
   }
@@ -150,16 +191,18 @@ export default function SettingsPage() {
                         {mapped && <div className="mt-1 font-mono text-xs font-medium text-zinc-800">→ {mapped.solariProfileId} • last {new Date(mapped.lastUsedAt).toLocaleDateString()}</div>}
                         <div className="mt-2 flex flex-wrap gap-2">
                           {!mapped ? (
-                            <button onClick={() => handleCreateProfile(pl.id)} disabled={creating === pl.id} className="rounded-full bg-zinc-900 px-4 py-1.5 text-xs font-bold text-white disabled:opacity-40 hover:bg-black">
+                            <button onClick={() => handleCreateProfile(pl.id)} disabled={creating === pl.id} className="rounded-full bg-zinc-900 px-4 py-1.5 text-xs font-bold text-white transition hover:bg-black active:scale-[0.98] disabled:opacity-40">
                               {creating === pl.id ? "Creating…" : `Connect ${pl.label}`}
                             </button>
                           ) : (
                             <>
-                              <a href="https://console.getsolari.com" target="_blank" className="rounded-full bg-zinc-900 px-4 py-1.5 text-xs font-bold text-white hover:bg-black">Open Solari editor →</a>
-                              <button onClick={() => handleCreateProfile(pl.id)} disabled={creating === pl.id} className="rounded-full border border-zinc-300 bg-white px-4 py-1.5 text-xs font-bold text-zinc-900 hover:bg-zinc-50 disabled:opacity-40">Recreate</button>
+                              <button onClick={() => handleLogin(pl.id)} disabled={loggingIn === pl.id} className="rounded-full bg-zinc-900 px-4 py-1.5 text-xs font-bold text-white transition hover:bg-black active:scale-[0.98] disabled:opacity-40">
+                                {loggingIn === pl.id ? "Preparing…" : loginInfo?.platform === pl.id && loginInfo.saved ? "Re-login" : `Log in to ${pl.label}`}
+                              </button>
+                              <button onClick={() => handleCreateProfile(pl.id)} disabled={creating === pl.id} className="rounded-full border border-zinc-300 bg-white px-4 py-1.5 text-xs font-bold text-zinc-900 transition hover:bg-zinc-50 active:scale-[0.98] disabled:opacity-40">Recreate</button>
                             </>
                           )}
-                          <span className="text-xs font-medium text-zinc-700 self-center">Docs: profiles → Open editor → log in → Save</span>
+                          <span className="text-xs font-medium text-zinc-700 self-center">One-time: log in here, cookies are reused forever after</span>
                         </div>
                       </div>
                     </div>
@@ -168,14 +211,20 @@ export default function SettingsPage() {
               </div>
 
               {profilesMsg && <div className="mt-3 rounded-xl border border-zinc-300 bg-zinc-50 p-3 text-xs font-medium leading-5 text-zinc-900 whitespace-pre-wrap break-words">{profilesMsg}</div>}
+              {loginInfo && !loginInfo.saved && (
+                <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs font-medium leading-5 text-amber-900">
+                  Waiting for you to finish logging in to {loginInfo.platform}…{" "}
+                  <a href={loginInfo.url} target="_blank" rel="noopener" className="font-bold underline">Open the login page</a> if it didn't open automatically. The badge flips to connected the moment you hit Save.
+                </div>
+              )}
               <div className="mt-3 rounded-xl bg-zinc-900 p-4 text-xs leading-5">
                 <div className="font-bold text-white tracking-wide">How login persists</div>
                 <ol className="mt-2 list-decimal pl-4 space-y-1 text-zinc-100">
-                  <li>Click Connect for gmail/linkedin → <code className="bg-zinc-800 border border-zinc-700 px-1.5 py-0.5 rounded font-mono text-zinc-100">client.profiles.create(&#123; name:&quot;gmail-...&quot; &#125;)</code> → <code className="bg-zinc-800 border border-zinc-700 px-1.5 py-0.5 rounded font-mono text-zinc-100">prof_xxx</code> saved to Convex.</li>
-                  <li>Go to <a href="https://console.getsolari.com" target="_blank" className="underline decoration-zinc-400 underline-offset-2 text-white hover:text-zinc-100">console.getsolari.com</a> → Profiles → <b className="text-white">Open editor</b> → log in → <b className="text-white">Save</b>.</li>
-                  <li>Next prompt → <code className="bg-zinc-800 border border-zinc-700 px-1.5 py-0.5 rounded font-mono text-zinc-100">client.launch(&#123; profileId: prof_xxx &#125;)</code> — already signed in.</li>
+                  <li>Click Connect → a browser profile is created on Solari for that platform.</li>
+                  <li>Click <b className="text-white">Log in</b> → a secure login page opens. Sign into the site (handles 2FA/captcha) and click <b className="text-white">Save</b>. No Solari account needed — your credentials never pass through Doppel.</li>
+                  <li>Every run attaches the saved cookies: <code className="bg-zinc-800 border border-zinc-700 px-1.5 py-0.5 rounded font-mono text-zinc-100">solari_browser_create(&#123; profileId &#125;)</code> — already signed in.</li>
                 </ol>
-                <div className="mt-2 text-zinc-300">Alt: upload storageState.json via <code className="bg-zinc-800 border border-zinc-700 px-1.5 py-0.5 rounded font-mono text-zinc-100">client.profiles.save(id, storageState)</code></div>
+                <div className="mt-2 text-zinc-300">If a session expires, just click Log in again — takes 30 seconds.</div>
               </div>
 
               {solariList && solariList.length > 0 && (

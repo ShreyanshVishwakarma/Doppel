@@ -285,7 +285,7 @@ export async function POST(req: Request) {
       }
       if (unsavedProfiles.length > 0) {
         const lines = unsavedProfiles.map((u) =>
-          `${u.platform}: profile ${u.profId} has never been logged in (no saved cookies). Open https://console.getsolari.com/profiles/${u.profId}/edit — log into ${u.platform} — click Save — then re-run.`
+          `${u.platform}: profile has no saved login. Open Settings → "Log in to ${u.platform}" — sign in on the login page — click Save — then re-run.`
         );
         return Response.json(
           { error: `Browser profile${unsavedProfiles.length > 1 ? "s" : ""} not logged in:\n${lines.join("\n")}`, profilesUsed: profileMap, needsLogin: unsavedProfiles.map((u) => u.platform) },
@@ -492,7 +492,7 @@ $(cat /tmp/profile_instruction.txt 2>/dev/null || echo '')
 1. If the task involves Gmail, LinkedIn, or any site requiring login, you MUST call solari_browser_create with the profileId from the profiles section above and recording: true. The harness applies the profile cookies for you — check the response: cookiesApplied > 0 means you are logged in.
 2. STRICTLY FORBIDDEN TOOLS: NEVER call solari_browser_login, solari_browser_await_login, or solari_browser_autologin_site, and NEVER click any \"Sign in\" button or navigate to accounts.google.com or any login form. The profile cookies are your ONLY login mechanism.
 3. After navigating, verify login with solari_browser_read_page (format: text): look for inbox markers (e.g. \"Compose\", \"Inbox\", \"Primary\", account avatar) instead of a sign-in form.
-4. If the page shows a sign-in form despite cookiesApplied > 0: write {\"status\":\"needsAuth\",\"needsAuth\":\"<platform>\",\"profileId\":\"<the id you used>\",\"hint\":\"Profile cookies missing or expired — open the Solari console editor, log in, and Save\"} to /tmp/result.json and stop immediately. Do not attempt any login.
+4. If the page shows a sign-in form despite cookiesApplied > 0: write {\"status\":\"needsAuth\",\"needsAuth\":\"<platform>\",\"profileId\":\"<the id you used>\",\"hint\":\"Profile cookies expired — user should click Log in in Settings and re-save\"} to /tmp/result.json and stop immediately. Do not attempt any login.
 5. Complete the task via browser, then call solari_browser_close and solari_browser_replay_url.
 6. Write result to /tmp/result.json" 2>&1 | cat
 INNEREOF
