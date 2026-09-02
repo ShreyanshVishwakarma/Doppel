@@ -10,6 +10,7 @@ import { api } from "../../convex/_generated/api";
 
 type Links = { linkedin: string; github: string; twitter: string; portfolio: string };
 type Preferences = { tone: string; targetRoles: string; locations: string; emailVolume: string };
+type Tab = "logins" | "profile" | "markdown";
 
 const PLATFORMS = [
   { id: "gmail", label: "Gmail", domain: "mail.google.com", desc: "Inbox triage, draft replies, approve to send. Needs Google login.", icon: "✉" },
@@ -17,6 +18,12 @@ const PLATFORMS = [
   { id: "twitter", label: "X / Twitter", domain: "x.com", desc: "Post, reply, DM. Profiles keep cookies.", icon: "𝕏" },
   { id: "github", label: "GitHub", domain: "github.com", desc: "Used for profile scraping fallback (usually no login needed).", icon: "⌥" },
 ] as const;
+
+const TABS: Array<{ id: Tab; label: string }> = [
+  { id: "logins", label: "Logins" },
+  { id: "profile", label: "Profile" },
+  { id: "markdown", label: "Markdown context" },
+];
 
 export default function SettingsPage() {
   const { user } = useUser();
@@ -27,6 +34,7 @@ export default function SettingsPage() {
   const generateUploadUrl = useMutation(api.profiles.generateUploadUrl);
   const saveProfile = useMutation(api.profiles.saveProfile);
 
+  const [tab, setTab] = useState<Tab>("logins");
   const [bio, setBio] = useState("");
   const [links, setLinks] = useState<Links>({ linkedin: "", github: "", twitter: "", portfolio: "" });
   const [prefs, setPrefs] = useState<Preferences>({ tone: "direct", targetRoles: "", locations: "", emailVolume: "high" });
@@ -75,18 +83,28 @@ export default function SettingsPage() {
     return () => clearInterval(t);
   }, [loginInfo]);
 
-  if (!isAuthenticated) return <div className="min-h-screen grid place-items-center p-6 text-sm text-zinc-900">Sign in to edit settings</div>;
-  if (profile === undefined) return <div className="min-h-screen grid place-items-center p-6 text-sm text-zinc-900">Loading…</div>;
-  if (!profile) return <div className="min-h-screen grid place-items-center p-6"><div className="text-center"><p className="text-sm text-zinc-900">No profile yet</p><Link href="/onboarding" className="mt-2 inline-flex rounded-full bg-zinc-900 px-4 py-2 text-xs font-bold text-white">Go to onboarding →</Link></div></div>;
+  if (!isAuthenticated) return <div className="min-h-screen grid place-items-center bg-[#fafaf9] p-6 text-sm text-stone-900">Sign in to edit settings</div>;
+  if (profile === undefined)
+    return (
+      <div className="min-h-screen bg-[#fafaf9] p-6">
+        <div className="mx-auto max-w-3xl space-y-4">
+          <div className="h-14 animate-pulse rounded-2xl bg-stone-200/60" />
+          <div className="h-10 w-48 animate-pulse rounded-full bg-stone-200/50" />
+          <div className="h-[50vh] animate-pulse rounded-2xl bg-stone-200/40" />
+        </div>
+      </div>
+    );
+  if (!profile) return <div className="min-h-screen grid place-items-center bg-[#fafaf9] p-6"><div className="text-center"><p className="text-sm text-stone-900">No profile yet</p><Link href="/onboarding" className="mt-2 inline-flex rounded-full bg-stone-900 px-4 py-2 text-xs font-bold text-white">Go to onboarding →</Link></div></div>;
 
   const role = profile?.role ?? "student";
   const markdownPreview = `# ${user?.fullName ?? "Profile"} — ${role} Context\n\n## Bio\n${bio}\n\n## Links\n- LinkedIn: ${links.linkedin || "—"}\n- GitHub: ${links.github || "—"}\n- X: ${links.twitter || "—"}\n- Portfolio: ${links.portfolio || "—"}\n\n## Preferences\n- Tone: ${prefs.tone}\n- Roles: ${prefs.targetRoles || "—"}\n- Locations: ${prefs.locations || "—"}\n`;
+  const connectedCount = (browserProfiles ?? []).filter((b) => b.status === "active").length;
 
   async function handleSave() {
     if (!profile) { setMsg("No profile"); return; }
     const markdownToSave = editableMarkdown.trim().length > 40 ? editableMarkdown : markdownPreview;
     const bioToSave = editableMarkdown.trim().length > 40 ? editableMarkdown.slice(0, 2000) : bio;
-    if (bioToSave.trim().length < 40) { setMsg("Bio/markdown must be 40+ chars — edit the markdown below"); return; }
+    if (bioToSave.trim().length < 40) { setMsg("Bio/markdown must be 40+ chars — edit the markdown in the Markdown context tab"); return; }
     setSaving(true); setMsg(null);
     try {
       let resumeStorageId: Id<"_storage"> | undefined = profile.resumeStorageId;
@@ -112,7 +130,7 @@ export default function SettingsPage() {
         links,
         preferences: prefs,
       });
-      setMsg("Saved ✓ — markdown updated. Next sandbox run will use it.");
+      setMsg("Saved — your context updates on the next run.");
       setResumeFile(null);
     } catch (e) { setMsg(e instanceof Error ? e.message : "Save failed"); }
     finally { setSaving(false); }
@@ -144,155 +162,261 @@ export default function SettingsPage() {
       const res = await fetch("/api/profiles", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ platform }) });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed");
-      setProfilesMsg(`Profile created for ${platform}. Now click "Log in" below and sign in — no Solari account needed.`);
+      setProfilesMsg(`Profile created for ${platform}. Now click "Log in" and sign in — no Solari account needed.`);
     } catch (e) { setProfilesMsg(e instanceof Error ? e.message : "Create failed"); }
     finally { setCreating(null); }
   }
 
+  const inputCls = "mt-1 w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm font-medium text-stone-900 placeholder:text-stone-400 transition focus:border-stone-900 focus:ring-2 focus:ring-stone-900/10 focus:outline-none";
+  const labelCls = "text-xs font-semibold text-stone-700";
+
   return (
     <div className="min-h-screen bg-[#fafaf9]">
-      <header className="sticky top-0 z-20 border-b bg-white">
-        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-6">
-          <Link href="/dashboard" className="flex items-center gap-2"><div className="flex h-7 w-7 items-center justify-center rounded-lg bg-zinc-900 text-xs font-bold text-white">D.</div><span className="text-sm font-bold text-zinc-900">Doppel</span><span className="rounded-full border border-zinc-300 bg-zinc-100 px-2 py-0.5 text-[10px] font-bold tracking-wide text-zinc-800">SETTINGS</span></Link>
-          <div className="flex items-center gap-3"><Link href="/dashboard" className="text-xs font-bold text-zinc-800 hover:text-zinc-900">Dashboard →</Link><UserButton /></div>
+      <header className="sticky top-0 z-20 border-b border-stone-200 bg-white">
+        <div className="mx-auto flex h-14 max-w-4xl items-center justify-between px-4 sm:px-6">
+          <Link href="/dashboard" className="flex items-center gap-2">
+            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-stone-900 text-xs font-bold text-white">D.</div>
+            <span className="text-sm font-bold tracking-tight text-stone-900">Doppel</span>
+          </Link>
+          <div className="flex items-center gap-3">
+            <Link href="/dashboard" className="text-xs font-semibold text-stone-600 transition hover:text-stone-900">← Dashboard</Link>
+            <UserButton />
+          </div>
         </div>
       </header>
-      <main className="mx-auto max-w-6xl px-6 py-8">
-        <h1 className="text-xl font-bold tracking-tight text-zinc-900">Settings & profiles</h1>
-        <p className="mt-1 text-sm leading-6 text-zinc-800">Edit your full markdown context directly, manage Solari browser profiles for Gmail/LinkedIn. Profiles keep you logged in — log in once in the Solari editor, then every sandbox run starts already signed in.</p>
 
-        <div className="mt-6 grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-          <div className="space-y-4">
-            <div className="rounded-2xl border border-zinc-300 bg-white p-5 shadow-sm">
-              <div className="text-xs font-bold tracking-widest text-zinc-800">BROWSER PROFILES — the key to Gmail & LinkedIn</div>
-              <p className="mt-2 text-xs leading-5 text-zinc-800">Per docs.getsolari.com/profiles: a profile saves cookies + storageState. Create one per platform, then <b className="font-semibold text-zinc-900">Open editor</b> at console.getsolari.com → Profiles, log into the site (handles 2FA/captcha), hit <b className="font-semibold text-zinc-900">Save</b>. Our harness attaches <code className="bg-zinc-100 border border-zinc-300 px-1.5 py-0.5 rounded font-mono text-sm font-medium text-zinc-900">profileId</code> when launching: <code className="bg-zinc-100 border border-zinc-300 px-1.5 py-0.5 rounded font-mono text-sm font-medium text-zinc-900">client.launch(&#123; profileId, stealth:true, recording:true &#125;)</code>.</p>
+      <main className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
+        <h1 className="text-xl font-semibold tracking-[-0.01em] text-stone-900">Settings</h1>
+        <p className="mt-1 max-w-[65ch] text-sm leading-6 text-stone-500">
+          Connect your accounts so Doppel starts each run already signed in, and tune the context it uses to act as you.
+        </p>
 
-              <div className="mt-4 space-y-3">
-                {PLATFORMS.map((pl) => {
-                  const mapped = (browserProfiles ?? []).find((b) => b.platform === pl.id);
-                  const isActive = mapped?.status === "active";
-                  return (
-                    <div key={pl.id} className={`rounded-xl border p-3 flex gap-3 items-start ${isActive ? "bg-emerald-50 border-emerald-300" : "bg-white border-zinc-300"}`}>
-                      <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border text-xs font-bold ${isActive ? "bg-emerald-600 text-white border-emerald-700" : "bg-white text-zinc-900 border-zinc-300"}`}>{pl.icon}</div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-sm font-bold text-zinc-900">{pl.label}</span>
-                          <span className="text-xs font-mono font-medium text-zinc-700">{pl.domain}</span>
-                          {mapped ? <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${isActive ? "bg-emerald-600 text-white" : "bg-amber-500 text-white"}`}>{mapped.status}</span> : <span className="rounded-full bg-zinc-200 border border-zinc-300 px-2 py-0.5 text-[10px] font-bold text-zinc-800">not connected</span>}
+        {/* tabs */}
+        <div className="mt-6 flex gap-1 rounded-xl border border-stone-200 bg-white p-1">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium transition ${tab === t.id ? "bg-stone-900 text-white" : "text-stone-600 hover:bg-stone-50"}`}
+            >
+              {t.label}
+              {t.id === "logins" && connectedCount > 0 && (
+                <span className={`tnum ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${tab === t.id ? "bg-white/20 text-white" : "bg-stone-100 text-stone-600"}`}>{connectedCount}</span>
+              )}
+            </button>
+          ))}
+        </div>
+
+        {/* ============ TAB: LOGINS ============ */}
+        {tab === "logins" && (
+          <div className="mt-6 space-y-4">
+            <div className="space-y-3">
+              {PLATFORMS.map((pl) => {
+                const mapped = (browserProfiles ?? []).find((b) => b.platform === pl.id);
+                const isActive = mapped?.status === "active";
+                return (
+                  <div key={pl.id} className={`rounded-xl border p-4 ${isActive ? "border-emerald-300 bg-emerald-50/60" : "border-stone-200 bg-white"}`}>
+                    <div className="flex items-start gap-3">
+                      <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border text-xs font-bold ${isActive ? "border-emerald-700 bg-emerald-600 text-white" : "border-stone-200 bg-white text-stone-900"}`}>{pl.icon}</div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-semibold text-stone-900">{pl.label}</span>
+                          <span className="font-mono text-xs text-stone-500">{pl.domain}</span>
+                          {mapped ? (
+                            <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${isActive ? "border-emerald-200 bg-emerald-100 text-emerald-700" : "border-amber-200 bg-amber-100 text-amber-700"}`}>{mapped.status === "active" ? "connected" : mapped.status}</span>
+                          ) : (
+                            <span className="rounded-full border border-stone-200 bg-stone-100 px-2 py-0.5 text-[10px] font-semibold text-stone-600">not connected</span>
+                          )}
                         </div>
-                        <div className="mt-1 text-xs leading-5 text-zinc-800">{pl.desc}</div>
+                        <p className="mt-1 text-xs leading-5 text-stone-600">{pl.desc}</p>
                         {mapped && (() => {
                           const sp = (solariList ?? []).find((s) => s.id === mapped.solariProfileId);
                           if (sp?.editorStatus === "error") {
-                            return <div className="mt-1 rounded-lg border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs font-semibold text-amber-900">⚠ Last editor save failed: {sp.editorError ?? "editor died"} — reopen the Solari editor, log in, and Save again.</div>;
+                            return <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs font-medium text-amber-900">Last save failed: {sp.editorError ?? "editor died"} — click Log in again and Save.</div>;
                           }
                           return null;
                         })()}
-                        {mapped && <div className="mt-1 font-mono text-xs font-medium text-zinc-800">→ {mapped.solariProfileId} • last {new Date(mapped.lastUsedAt).toLocaleDateString()}</div>}
-                        <div className="mt-2 flex flex-wrap gap-2">
+                        {mapped && <div className="mt-1 font-mono text-[11px] text-stone-500">{mapped.solariProfileId.slice(0, 24)}… • last used {new Date(mapped.lastUsedAt).toLocaleDateString()}</div>}
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
                           {!mapped ? (
-                            <button onClick={() => handleCreateProfile(pl.id)} disabled={creating === pl.id} className="rounded-full bg-zinc-900 px-4 py-1.5 text-xs font-bold text-white transition hover:bg-black active:scale-[0.98] disabled:opacity-40">
+                            <button onClick={() => handleCreateProfile(pl.id)} disabled={creating === pl.id} className="rounded-full bg-stone-900 px-4 py-1.5 text-xs font-semibold text-white transition hover:bg-black active:scale-[0.98] disabled:opacity-40">
                               {creating === pl.id ? "Creating…" : `Connect ${pl.label}`}
                             </button>
                           ) : (
                             <>
-                              <button onClick={() => handleLogin(pl.id)} disabled={loggingIn === pl.id} className="rounded-full bg-zinc-900 px-4 py-1.5 text-xs font-bold text-white transition hover:bg-black active:scale-[0.98] disabled:opacity-40">
+                              <button onClick={() => handleLogin(pl.id)} disabled={loggingIn === pl.id} className="rounded-full bg-stone-900 px-4 py-1.5 text-xs font-semibold text-white transition hover:bg-black active:scale-[0.98] disabled:opacity-40">
                                 {loggingIn === pl.id ? "Preparing…" : loginInfo?.platform === pl.id && loginInfo.saved ? "Re-login" : `Log in to ${pl.label}`}
                               </button>
-                              <button onClick={() => handleCreateProfile(pl.id)} disabled={creating === pl.id} className="rounded-full border border-zinc-300 bg-white px-4 py-1.5 text-xs font-bold text-zinc-900 transition hover:bg-zinc-50 active:scale-[0.98] disabled:opacity-40">Recreate</button>
+                              <button onClick={() => handleCreateProfile(pl.id)} disabled={creating === pl.id} className="rounded-full border border-stone-200 bg-white px-4 py-1.5 text-xs font-semibold text-stone-900 transition hover:bg-stone-50 active:scale-[0.98] disabled:opacity-40">Recreate</button>
                             </>
                           )}
-                          <span className="text-xs font-medium text-zinc-700 self-center">One-time: log in here, cookies are reused forever after</span>
                         </div>
                       </div>
                     </div>
-                  );
-                })}
-              </div>
-
-              {profilesMsg && <div className="mt-3 rounded-xl border border-zinc-300 bg-zinc-50 p-3 text-xs font-medium leading-5 text-zinc-900 whitespace-pre-wrap break-words">{profilesMsg}</div>}
-              {loginInfo && !loginInfo.saved && (
-                <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs font-medium leading-5 text-amber-900">
-                  Waiting for you to finish logging in to {loginInfo.platform}…{" "}
-                  <a href={loginInfo.url} target="_blank" rel="noopener" className="font-bold underline">Open the login page</a> if it didn't open automatically. The badge flips to connected the moment you hit Save.
-                </div>
-              )}
-              <div className="mt-3 rounded-xl bg-zinc-900 p-4 text-xs leading-5">
-                <div className="font-bold text-white tracking-wide">How login persists</div>
-                <ol className="mt-2 list-decimal pl-4 space-y-1 text-zinc-100">
-                  <li>Click Connect → a browser profile is created on Solari for that platform.</li>
-                  <li>Click <b className="text-white">Log in</b> → a secure login page opens. Sign into the site (handles 2FA/captcha) and click <b className="text-white">Save</b>. No Solari account needed — your credentials never pass through Doppel.</li>
-                  <li>Every run attaches the saved cookies: <code className="bg-zinc-800 border border-zinc-700 px-1.5 py-0.5 rounded font-mono text-zinc-100">solari_browser_create(&#123; profileId &#125;)</code> — already signed in.</li>
-                </ol>
-                <div className="mt-2 text-zinc-300">If a session expires, just click Log in again — takes 30 seconds.</div>
-              </div>
-
-              {solariList && solariList.length > 0 && (
-                <div className="mt-3 rounded-xl border border-zinc-300 bg-white p-3">
-                  <div className="text-xs font-bold text-zinc-900">Raw Solari profiles for this API key ({solariList.length})</div>
-                  <div className="mt-1 space-y-1 font-mono text-xs max-h-[120px] overflow-auto">
-                    {solariList.map(p=> <div key={p.id} className="flex justify-between gap-2"><span className="font-medium text-zinc-900">{p.name}</span><span className="font-medium text-zinc-700">{p.id.slice(0,16)}…</span></div>)}
                   </div>
+                );
+              })}
+            </div>
+
+            {profilesMsg && <div className="rounded-xl border border-stone-200 bg-white p-3 text-xs font-medium leading-5 text-stone-900 whitespace-pre-wrap break-words">{profilesMsg}</div>}
+            {loginInfo && !loginInfo.saved && (
+              <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs font-medium leading-5 text-amber-900">
+                Waiting for you to finish logging in to {loginInfo.platform}…{" "}
+                <a href={loginInfo.url} target="_blank" rel="noopener" className="font-bold underline">Open the login page</a> if it didn't open automatically.
+              </div>
+            )}
+
+            <details className="group rounded-xl border border-stone-200 bg-white">
+              <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-xs font-semibold text-stone-700 transition hover:bg-stone-50">
+                How login persists
+                <span className="ml-auto text-xs font-medium text-stone-400 group-open:hidden">Show</span>
+                <span className="ml-auto hidden text-xs font-medium text-stone-400 group-open:inline">Hide</span>
+              </summary>
+              <div className="border-t border-stone-200 px-4 py-3">
+                <ol className="list-decimal space-y-1.5 pl-4 text-xs leading-5 text-stone-600">
+                  <li>Click Connect — a browser profile is created on Solari for that platform.</li>
+                  <li>Click Log in — a secure login page opens. Sign into the site (handles 2FA/captcha) and click Save. Your credentials never pass through Doppel.</li>
+                  <li>Every run attaches the saved cookies — the browser starts already signed in.</li>
+                </ol>
+                <p className="mt-2 text-xs text-stone-500">If a session expires, click Log in again — takes 30 seconds.</p>
+              </div>
+            </details>
+
+            {(browserProfiles ?? []).length > 0 && (
+              <details className="group rounded-xl border border-stone-200 bg-white">
+                <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-xs font-semibold text-stone-700 transition hover:bg-stone-50">
+                  Stored connections
+                  <span className="tnum rounded-full bg-stone-100 px-1.5 py-0.5 font-mono text-[10px] text-stone-600">{(browserProfiles ?? []).length}</span>
+                  <span className="ml-auto text-xs font-medium text-stone-400 group-open:hidden">Show</span>
+                  <span className="ml-auto hidden text-xs font-medium text-stone-400 group-open:inline">Hide</span>
+                </summary>
+                <div className="space-y-2 border-t border-stone-200 p-3">
+                  {(browserProfiles ?? []).map((p) => (
+                    <div key={p._id} className="flex items-center justify-between rounded-lg border border-stone-200 px-3 py-2">
+                      <span className="font-mono text-xs text-stone-900">{p.platform} → {p.solariProfileId.slice(0, 18)}…</span>
+                      <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${p.status === "active" ? "border-emerald-200 bg-emerald-100 text-emerald-700" : "border-amber-200 bg-amber-100 text-amber-700"}`}>{p.status}</span>
+                    </div>
+                  ))}
                 </div>
-              )}
-            </div>
-
-            <div className="rounded-2xl border border-zinc-300 bg-white p-5 shadow-sm">
-              <div className="text-xs font-bold tracking-widest text-zinc-800">BIO — MARKDOWN CONTEXT</div>
-              <p className="mt-1 text-xs text-zinc-700">Quick edit — also updates the full markdown below. Or edit the full markdown directly.</p>
-              <textarea value={bio} onChange={(e)=>{ setBio(e.target.value); setEditableMarkdown(`# ${user?.fullName ?? "Profile"} — ${role} Context\n\n## Bio\n${e.target.value}\n\n## Links\n- LinkedIn: ${links.linkedin || "—"}\n- GitHub: ${links.github || "—"}\n- X: ${links.twitter || "—"}\n- Portfolio: ${links.portfolio || "—"}\n\n## Preferences\n- Tone: ${prefs.tone}\n- Roles: ${prefs.targetRoles || "—"}\n- Locations: ${prefs.locations || "—"}\n`); }} rows={7} className="mt-3 w-full rounded-xl border border-zinc-300 bg-white p-3 text-sm leading-6 text-zinc-900 placeholder:text-zinc-500 focus:outline-none focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900" />
-              <div className="mt-1 text-xs font-medium text-zinc-700">{bio.length} chars</div>
-              {(["linkedin","github","twitter","portfolio"] as const).map(k=>(
-                <div key={k} className="mt-3"><label className="text-xs font-bold capitalize text-zinc-900">{k}</label><input value={links[k]} onChange={e=>{ const v=e.target.value; setLinks({...links, [k]: v}); setEditableMarkdown(`# ${user?.fullName ?? "Profile"} — ${role} Context\n\n## Bio\n${bio}\n\n## Links\n- LinkedIn: ${k==="linkedin"?v:links.linkedin || "—"}\n- GitHub: ${k==="github"?v:links.github || "—"}\n- X: ${k==="twitter"?v:links.twitter || "—"}\n- Portfolio: ${k==="portfolio"?v:links.portfolio || "—"}\n\n## Preferences\n- Tone: ${prefs.tone}\n- Roles: ${prefs.targetRoles || "—"}\n- Locations: ${prefs.locations || "—"}\n`); }} className="mt-1 w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-900 placeholder:text-zinc-500 focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 focus:outline-none" placeholder={`https://${k}.com/...`} /></div>
-              ))}
-              <div className="mt-3 grid grid-cols-2 gap-3">
-                <div><label className="text-xs font-bold text-zinc-900">Tone</label><select value={prefs.tone} onChange={e=>{ const v=e.target.value; setPrefs({...prefs, tone:v}); setEditableMarkdown(`# ${user?.fullName ?? "Profile"} — ${role} Context\n\n## Bio\n${bio}\n\n## Links\n- LinkedIn: ${links.linkedin || "—"}\n- GitHub: ${links.github || "—"}\n- X: ${links.twitter || "—"}\n- Portfolio: ${links.portfolio || "—"}\n\n## Preferences\n- Tone: ${v}\n- Roles: ${prefs.targetRoles || "—"}\n- Locations: ${prefs.locations || "—"}\n`); }} className="mt-1 w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-900 focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 focus:outline-none"><option value="direct">direct</option><option value="casual">casual</option><option value="formal">formal</option></select></div>
-                <div><label className="text-xs font-bold text-zinc-900">Email volume</label><select value={prefs.emailVolume} onChange={e=>{ const v=e.target.value; setPrefs({...prefs, emailVolume:v}); }} className="mt-1 w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-900 focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 focus:outline-none"><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select></div>
-              </div>
-              <div className="mt-3"><label className="text-xs font-bold text-zinc-900">Target roles</label><input value={prefs.targetRoles} onChange={e=>setPrefs({...prefs, targetRoles:e.target.value})} className="mt-1 w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-900 placeholder:text-zinc-500 focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 focus:outline-none" /></div>
-              <div className="mt-3"><label className="text-xs font-bold text-zinc-900">Locations</label><input value={prefs.locations} onChange={e=>setPrefs({...prefs, locations:e.target.value})} className="mt-1 w-full rounded-xl border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-900 placeholder:text-zinc-500 focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 focus:outline-none" /></div>
-              <div className="mt-3"><label className="text-xs font-bold text-zinc-900">Resume (PDF)</label><input type="file" accept=".pdf,.doc,.docx,.md" onChange={e=>setResumeFile(e.target.files?.[0] ?? null)} className="mt-1 w-full text-sm font-medium text-zinc-900 file:mr-3 file:rounded-full file:border file:border-zinc-300 file:bg-white file:px-3 file:py-1 file:text-xs file:font-bold file:text-zinc-900 hover:file:bg-zinc-50" /><div className="mt-1 text-xs font-medium text-zinc-700">{profile.resumeFileName ?? "No resume"} {resumeFile && `→ ${resumeFile.name}`}</div></div>
-            </div>
+              </details>
+            )}
           </div>
+        )}
 
-          <div className="space-y-4">
-            <div className="rounded-2xl border border-zinc-300 bg-white p-4 shadow-sm">
-              <div className="flex items-center justify-between">
-                <div className="text-xs font-bold tracking-widest text-zinc-800">FULL MARKDOWN — editable</div>
-                <span className="rounded-full bg-emerald-50 border border-emerald-300 px-2 py-0.5 text-xs font-bold text-emerald-800">live — edit & save</span>
-              </div>
-              <p className="mt-1 text-xs leading-5 text-zinc-700">This is the exact file saved to Convex and injected into every sandbox. Edit it directly — Save below updates it.</p>
-              <textarea value={editableMarkdown} onChange={e=>setEditableMarkdown(e.target.value)} rows={22} className="mt-3 w-full rounded-xl border border-zinc-300 bg-white p-3 font-mono text-sm leading-5 text-zinc-900 placeholder:text-zinc-500 focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 focus:outline-none" placeholder="# Your markdown..." />
-              <div className="mt-2 flex items-center justify-between">
-                <span className="text-xs font-medium text-zinc-700">{editableMarkdown.length} chars • {editableMarkdown.split("\n").length} lines</span>
-                <span className="text-xs text-zinc-600">{editableMarkdown.length > 100000 ? "Too long — trim to <100k" : "Ready to save"}</span>
-              </div>
-              <button onClick={handleSave} disabled={saving || editableMarkdown.trim().length < 40} className="mt-3 w-full rounded-xl bg-zinc-900 py-3 text-sm font-bold text-white hover:bg-black disabled:opacity-40"> {saving ? "Saving…" : "Save full markdown → update profile"} </button>
-              {msg && <div className={`mt-2 rounded-xl border px-3 py-2 text-xs font-medium ${msg.includes("Saved") ? "bg-emerald-50 border-emerald-300 text-emerald-900" : "bg-red-50 border-red-300 text-red-800"}`}>{msg}</div>}
-              {profileWithUrls?.markdownUrl && <a href={profileWithUrls.markdownUrl} target="_blank" className="mt-2 inline-block text-xs font-bold text-zinc-900 underline decoration-zinc-400 underline-offset-4 hover:text-black">Open .md in Convex →</a>}
-              <div className="mt-2 text-xs leading-5 text-zinc-600">Preview generated from fields above: <span className="font-mono text-zinc-800">{markdownPreview.slice(0,60)}…</span></div>
+        {/* ============ TAB: PROFILE ============ */}
+        {tab === "profile" && (
+          <div className="mt-6 space-y-4">
+            <div className="rounded-xl border border-stone-200 bg-white p-5">
+              <h2 className="text-sm font-semibold text-stone-900">About you</h2>
+              <p className="mt-0.5 text-xs text-stone-500">This paragraph is the core of the context Doppel uses to write and speak as you.</p>
+              <textarea
+                value={bio}
+                onChange={(e) => setBio(e.target.value)}
+                rows={7}
+                className={inputCls}
+                placeholder="Two or three sentences about who you are, what you do, and what you're looking for…"
+              />
+              <div className="mt-1 text-xs text-stone-500">{bio.length} chars — needs at least 40</div>
             </div>
 
-            <div className="rounded-2xl border border-zinc-300 bg-white p-4 shadow-sm">
-              <div className="text-xs font-bold tracking-widest text-zinc-800">CONNECTED (Convex)</div>
-              {(browserProfiles ?? []).length===0 ? <div className="mt-2 rounded-xl border border-dashed border-zinc-300 bg-zinc-50 p-3 text-xs font-medium text-zinc-800">No browserProfiles rows yet — create via Connect buttons above.</div> :
-                (browserProfiles ?? []).map(p=>(
-                  <div key={p._id} className="mt-2 flex items-center justify-between rounded-xl border border-zinc-300 bg-white px-3 py-2.5"><span className="font-mono text-xs font-bold text-zinc-900">{p.platform} → {p.solariProfileId.slice(0,18)}…</span><span className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${p.status==="active"?"bg-emerald-600 text-white":"bg-amber-500 text-white"}`}>{p.status}</span></div>
+            <div className="rounded-xl border border-stone-200 bg-white p-5">
+              <h2 className="text-sm font-semibold text-stone-900">Links</h2>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                {(["linkedin", "github", "twitter", "portfolio"] as const).map((k) => (
+                  <div key={k}>
+                    <label className={labelCls + " capitalize"}>{k}</label>
+                    <input value={links[k]} onChange={(e) => setLinks({ ...links, [k]: e.target.value })} className={inputCls} placeholder={`https://${k}.com/...`} />
+                  </div>
                 ))}
-              <p className="mt-2 text-xs leading-5 font-medium text-zinc-800">Stored in Convex <code className="bg-zinc-100 border border-zinc-300 px-1.5 py-0.5 rounded font-mono text-sm font-bold text-zinc-900">browserProfiles</code> with index <code className="bg-zinc-100 border border-zinc-300 px-1.5 py-0.5 rounded font-mono text-sm font-bold text-zinc-900">by_user_platform</code>.</p>
-            </div>
-            <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4 text-white">
-              <div className="text-xs font-bold tracking-widest text-zinc-200">ARCHITECTURE</div>
-              <div className="mt-2 space-y-1 font-mono text-xs leading-5 font-medium text-zinc-100">
-                <div>Next.js /api/run → Sandboxes.create(fromSnapshot)</div>
-                <div>Sandbox boots in ms → writes /tmp/task + profiles.json</div>
-                <div>Harness launches Solari browser with profileId + recording</div>
-                <div>Trace streams via /tmp/trace.jsonl → Convex → Dashboard</div>
-                <div>Replay URL fetched after close → dashboard link</div>
               </div>
             </div>
+
+            <div className="rounded-xl border border-stone-200 bg-white p-5">
+              <h2 className="text-sm font-semibold text-stone-900">Preferences</h2>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className={labelCls}>Tone</label>
+                  <select value={prefs.tone} onChange={(e) => setPrefs({ ...prefs, tone: e.target.value })} className={inputCls}>
+                    <option value="direct">direct</option>
+                    <option value="casual">casual</option>
+                    <option value="formal">formal</option>
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls}>Email volume</label>
+                  <select value={prefs.emailVolume} onChange={(e) => setPrefs({ ...prefs, emailVolume: e.target.value })} className={inputCls}>
+                    <option value="low">low</option>
+                    <option value="medium">medium</option>
+                    <option value="high">high</option>
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls}>Target roles</label>
+                  <input value={prefs.targetRoles} onChange={(e) => setPrefs({ ...prefs, targetRoles: e.target.value })} className={inputCls} placeholder="e.g. frontend engineer, PM" />
+                </div>
+                <div>
+                  <label className={labelCls}>Locations</label>
+                  <input value={prefs.locations} onChange={(e) => setPrefs({ ...prefs, locations: e.target.value })} className={inputCls} placeholder="e.g. remote, Bengaluru" />
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-stone-200 bg-white p-5">
+              <h2 className="text-sm font-semibold text-stone-900">Resume</h2>
+              <input type="file" accept=".pdf,.doc,.docx,.md" onChange={(e) => setResumeFile(e.target.files?.[0] ?? null)} className="mt-2 w-full text-sm font-medium text-stone-900 file:mr-3 file:cursor-pointer file:rounded-full file:border file:border-stone-200 file:bg-white file:px-3 file:py-1 file:text-xs file:font-semibold file:text-stone-900 transition hover:file:bg-stone-50" />
+              <div className="mt-1 text-xs text-stone-500">{profile.resumeFileName ?? "No resume uploaded"}{resumeFile ? ` → ${resumeFile.name}` : ""}</div>
+            </div>
+
+            {/* save bar */}
+            <div className="sticky bottom-4 rounded-xl border border-stone-200 bg-white p-3 shadow-lg shadow-stone-900/5">
+              <div className="flex items-center gap-3">
+                <div className="min-w-0 flex-1 text-xs text-stone-500">Saves bio, links, preferences, resume and markdown together.</div>
+                <button onClick={handleSave} disabled={saving || editableMarkdown.trim().length < 40} className="shrink-0 rounded-full bg-stone-900 px-5 py-2 text-sm font-semibold text-white transition hover:bg-black active:scale-[0.98] disabled:opacity-40">
+                  {saving ? "Saving…" : "Save changes"}
+                </button>
+              </div>
+              {msg && <div className={`mt-2 rounded-lg border px-3 py-2 text-xs font-medium ${msg.startsWith("Saved") ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-red-200 bg-red-50 text-red-700"}`}>{msg}</div>}
+            </div>
           </div>
-        </div>
+        )}
+
+        {/* ============ TAB: MARKDOWN ============ */}
+        {tab === "markdown" && (
+          <div className="mt-6 space-y-4">
+            <div className="rounded-xl border border-stone-200 bg-white p-5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h2 className="text-sm font-semibold text-stone-900">Markdown context</h2>
+                  <p className="mt-0.5 text-xs text-stone-500">The exact file injected into every run. Edit it directly — fields from the Profile tab sync into it when you edit them.</p>
+                </div>
+                <span className={`tnum rounded-full border px-2.5 py-0.5 text-xs font-medium ${editableMarkdown.length > 100000 ? "border-red-200 bg-red-50 text-red-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}>
+                  {editableMarkdown.length > 100000 ? "Too long — trim below 100k" : "Ready to save"}
+                </span>
+              </div>
+              <textarea
+                value={editableMarkdown}
+                onChange={(e) => setEditableMarkdown(e.target.value)}
+                rows={22}
+                className="mt-3 w-full rounded-xl border border-stone-200 bg-white p-3 font-mono text-sm leading-5 text-stone-900 placeholder:text-stone-400 transition focus:border-stone-900 focus:ring-2 focus:ring-stone-900/10 focus:outline-none"
+                placeholder="# Your markdown..."
+              />
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-stone-500">
+                <span className="tnum">{editableMarkdown.length} chars • {editableMarkdown.split("\n").length} lines</span>
+                {profileWithUrls?.markdownUrl && <a href={profileWithUrls.markdownUrl} target="_blank" className="font-semibold text-stone-700 underline decoration-stone-300 underline-offset-4 transition hover:text-stone-900">Open .md in Convex →</a>}
+              </div>
+            </div>
+
+            <div className="sticky bottom-4 rounded-xl border border-stone-200 bg-white p-3 shadow-lg shadow-stone-900/5">
+              <div className="flex items-center gap-3">
+                <div className="min-w-0 flex-1 text-xs text-stone-500">Saves markdown together with bio, links, preferences and resume.</div>
+                <button onClick={handleSave} disabled={saving || editableMarkdown.trim().length < 40} className="shrink-0 rounded-full bg-stone-900 px-5 py-2 text-sm font-semibold text-white transition hover:bg-black active:scale-[0.98] disabled:opacity-40">
+                  {saving ? "Saving…" : "Save changes"}
+                </button>
+              </div>
+              {msg && <div className={`mt-2 rounded-lg border px-3 py-2 text-xs font-medium ${msg.startsWith("Saved") ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-red-200 bg-red-50 text-red-700"}`}>{msg}</div>}
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );
