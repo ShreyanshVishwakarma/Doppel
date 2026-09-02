@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Show, SignInButton, SignUpButton, UserButton } from "@clerk/nextjs";
+import { OpenDoppelCta } from "@/components/open-doppel-cta";
 
 // ---------- shared tiny icons (no extra deps) ----------
 function ArrowRight() {
@@ -52,12 +53,7 @@ export default function Home() {
               </Link>
             </Show>
             <Show when="signed-in">
-              <Link
-                href="/onboarding"
-                className="inline-flex h-9 items-center justify-center rounded-full bg-zinc-900 px-5 text-sm font-medium text-white transition hover:bg-zinc-800"
-              >
-                Open Doppel
-              </Link>
+              <OpenDoppelCta />
               <UserButton />
             </Show>
           </div>
@@ -108,12 +104,7 @@ export default function Home() {
                 </Link>
               </Show>
               <Show when="signed-in">
-                <Link
-                  href="/onboarding"
-                  className="inline-flex h-11 items-center gap-2 rounded-full bg-zinc-900 px-6 text-sm font-medium text-white shadow-sm transition hover:bg-black"
-                >
-                  Continue onboarding <ArrowRight />
-                </Link>
+                <OpenDoppelCta variant="hero" />
               </Show>
             </div>
 
@@ -278,12 +269,7 @@ export default function Home() {
                   <span className="font-medium text-zinc-900">Working Professional</span>? The entire flow adapts — resume & social graph for job seeking, inbox & calendar primacy for operators. One paragraph about you becomes your markdown context for every LLM decision.
                 </p>
               </div>
-              <Link
-                href="/onboarding"
-                className="inline-flex h-11 shrink-0 items-center justify-center rounded-full bg-zinc-900 px-6 text-sm font-medium text-white hover:bg-black"
-              >
-                Start onboarding — 2 min
-              </Link>
+              <OpenDoppelCta doneLabel="Open dashboard" newLabel="Start onboarding — 2 min" />
             </div>
 
             <div className="mt-6 grid gap-4 md:grid-cols-2">
