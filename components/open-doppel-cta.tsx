@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useConvexAuth, useQuery } from "convex/react";
-import { api } from "../../convex/_generated/api";
+import { api } from "../convex/_generated/api";
 
 // State-aware CTA: onboarded users go straight to the dashboard, new users
 // to onboarding. Renders a neutral placeholder while auth/profile resolves
