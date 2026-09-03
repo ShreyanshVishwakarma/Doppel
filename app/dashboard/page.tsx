@@ -105,23 +105,40 @@ function SessionCard({ s, isSel, onClick }: { s: { _id: string; status: string; 
   );
 }
 
-function PromptForm({ compact, input, setInput, runState, runError, onSubmit }: { compact?: boolean; input: string; setInput: (v: string) => void; runState: "idle" | "running"; runError: string | null; onSubmit: (e: React.FormEvent) => void }) {
+function PromptForm({ compact, input, setInput, runState, runError, onSubmit, disabled }: { compact?: boolean; input: string; setInput: (v: string) => void; runState: "idle" | "running"; runError: string | null; onSubmit: (e: React.FormEvent) => void; disabled?: boolean }) {
+  const taRef = useRef<HTMLTextAreaElement>(null);
+  // auto-grow: the box expands with the text instead of clipping it
+  useEffect(() => {
+    const el = taRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = Math.min(el.scrollHeight, 200) + "px";
+  }, [input]);
+  const busy = runState === "running" || disabled;
   return (
     <form onSubmit={onSubmit}>
-      <div className={`flex items-center gap-2 rounded-xl border border-stone-200 bg-white transition focus-within:border-stone-900 focus-within:ring-2 focus-within:ring-stone-900/10 ${compact ? "px-3 py-2" : "px-4 py-3 shadow-sm"}`}>
-        <input
+      <div className={`flex items-end gap-2 rounded-xl border border-stone-200 bg-white transition focus-within:border-stone-900 focus-within:ring-2 focus-within:ring-stone-900/10 ${compact ? "px-3 py-2" : "px-4 py-3 shadow-sm"}`}>
+        <textarea
+          ref={taRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              if (!busy && input.trim()) e.currentTarget.form?.requestSubmit();
+            }
+          }}
+          rows={1}
           placeholder={compact ? "Send a follow-up task…" : "Ask: open Gmail and send hello…"}
-          className="min-w-0 flex-1 bg-transparent text-sm text-stone-900 placeholder:text-stone-400 focus:outline-none"
-          disabled={runState === "running"}
+          className="max-h-[200px] min-h-[24px] min-w-0 flex-1 resize-none bg-transparent py-1 text-sm leading-6 text-stone-900 placeholder:text-stone-400 focus:outline-none"
+          disabled={busy}
         />
-        <button type="submit" disabled={runState === "running" || !input.trim()} className="shrink-0 rounded-lg bg-stone-900 px-4 py-1.5 text-sm font-semibold text-white transition hover:bg-black active:scale-[0.98] disabled:opacity-40">
+        <button type="submit" disabled={busy || !input.trim()} className="shrink-0 rounded-lg bg-stone-900 px-4 py-1.5 text-sm font-semibold text-white transition hover:bg-black active:scale-[0.98] disabled:opacity-40">
           {runState === "running" ? "…" : "Run"}
         </button>
       </div>
       <div className={`flex items-center justify-between text-xs text-stone-500 ${compact ? "mt-1.5 px-1" : "mt-2 px-1"}`}>
-        <span className="tnum">{input.length}/5000</span>
+        <span className="tnum">{input.length}/5000 <span className="hidden sm:inline">• Enter to run, Shift+Enter for a new line</span></span>
         <Link href="/settings" className="font-medium text-stone-600 transition hover:text-stone-900">Profiles →</Link>
       </div>
       {runError && <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700">{runError}</div>}
@@ -142,6 +159,7 @@ export default function DashboardPage() {
   const [composing, setComposing] = useState(true);
   const [showTech, setShowTech] = useState(false);
   const [stopping, setStopping] = useState(false);
+  const [pending, setPending] = useState<{ prompt: string } | null>(null);
 
   async function handleStop() {
     if (!selected || stopping) return;
@@ -179,15 +197,22 @@ export default function DashboardPage() {
     if (!text) return;
     setRunError(null);
     setRunState("running");
+    // optimistic: jump straight to an "accepted" view while the sandbox boots
+    setPending({ prompt: text });
+    setComposing(false);
+    setSelectedId(null);
+    setInput("");
     try {
       const res = await fetch("/api/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt: text }) });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed");
       setSelectedId(data.sessionId);
-      setComposing(false);
-      setInput("");
+      setPending(null);
     } catch (err) {
       setRunError(err instanceof Error ? err.message : "Failed");
+      setPending(null);
+      setInput(text); // restore the text so nothing is lost
+      setComposing(true);
     } finally {
       setRunState("idle");
     }
@@ -223,8 +248,9 @@ export default function DashboardPage() {
 
   const runningCount = (sessions ?? []).filter((s) => s.status === "running").length;
   const selectedMeta = selected ? statusMeta(selected.status) : null;
-  const showComposer = !selected || composing;
-  const showSession = !!selected && !composing;
+  const showPending = pending !== null;
+  const showComposer = !pending && (!selected || composing);
+  const showSession = !pending && !!selected && !composing;
 
   return (
     <div className="flex h-screen overflow-hidden bg-[#fafaf9]">
@@ -294,7 +320,44 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {showComposer ? (
+        {showPending && pending ? (
+          /* ---------- PENDING: request accepted, sandbox booting ---------- */
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="min-h-0 flex-1 overflow-auto">
+              <div className="mx-auto w-full max-w-[850px] px-4 pt-6 sm:px-6">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-stone-200 bg-stone-100 px-2.5 py-1 text-xs font-semibold text-stone-700">
+                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-600" />Starting
+                  </span>
+                  <span className="text-xs text-stone-500">just now</span>
+                </div>
+                <div className="mt-3 rounded-xl border border-stone-200 bg-white p-4">
+                  <div className="flex items-center gap-2 text-emerald-800">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-600 text-xs text-white">✓</span>
+                    <span className="text-sm font-semibold">Task accepted</span>
+                  </div>
+                  <p className="mt-1.5 text-sm leading-6 text-stone-700">Booting your sandbox and attaching your saved logins. You'll see browser actions stream here within a few seconds.</p>
+                </div>
+                <h1 className="mt-4 max-w-[80ch] text-[19px] font-semibold leading-[1.5] tracking-[-0.01em] text-stone-900 [text-wrap:balance]">{pending.prompt}</h1>
+                <div className="mt-8">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-xs font-medium tracking-wide text-stone-400">Timeline</h2>
+                  </div>
+                  <div className="mt-3 space-y-3 rounded-xl border border-stone-200 bg-white p-4">
+                    <div className="h-3 w-2/3 animate-pulse rounded-full bg-stone-200" />
+                    <div className="h-3 w-1/2 animate-pulse rounded-full bg-stone-200/80" />
+                    <div className="h-3 w-3/5 animate-pulse rounded-full bg-stone-200/60" />
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="sticky bottom-0 border-t border-stone-200 bg-[#fafaf9]/95 px-4 py-3 backdrop-blur sm:px-6">
+              <div className="mx-auto w-full max-w-[850px]">
+                <PromptForm compact input={input} setInput={setInput} runState="running" runError={null} onSubmit={(e) => e.preventDefault()} disabled />
+              </div>
+            </div>
+          </div>
+        ) : showComposer ? (
           /* ---------- STATE A: new session ---------- */
           <div className="flex flex-1 flex-col items-center justify-center overflow-auto px-6 pb-24">
             <div className="w-full max-w-[720px]">

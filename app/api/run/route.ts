@@ -499,7 +499,9 @@ INNEREOF
 chmod +x /tmp/inner.sh
 # opencode requires a PTY to emit LLM output — without script it exits after init with no output
 which script 2>&1 | head -n 2; ls -lh /usr/bin/script 2>&1 | head -n 2; echo "inner.sh size $(wc -c < /tmp/inner.sh 2>&1) prompt $(wc -c < /tmp/prompt.md 2>&1)"
-timeout 450 script -q -c 'bash /tmp/inner.sh 2>&1 | cat' /tmp/opencode.raw 2>&1 | head -n 20
+# no timeout — complex tasks (multi-step applications, outreach loops) run as long as they need;
+# the sandbox VM's own idle TTL is the only bound
+script -q -c 'bash /tmp/inner.sh 2>&1 | cat' /tmp/opencode.raw 2>&1 | head -n 20
 echo "raw size $(wc -c < /tmp/opencode.raw 2>&1) lines $(wc -l < /tmp/opencode.raw 2>&1)"; head -n 20 /tmp/opencode.raw 2>&1 | cat -v | head -n 20
 cat /tmp/opencode.raw 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | sed 's/\r//g' | head -n 800 > /tmp/opencode.out
 OPENCODE_EXIT=$?
@@ -532,14 +534,14 @@ if [ ! -f /tmp/result.json ]; then
       const lines=txt.split('\n').map(l=>l.replace(/\r/g,'').trim()).filter(Boolean);
       // strong needsAuth signals only (page text often contains the words 'sign in')
       const strongAuth = /sign in to continue|accounts\.google\.com|choose an account|enter your email|email or phone/i.test(txt);
-      // assistant's final prose = lines that are not tool calls or script boilerplate
-      const prose = lines.filter(l => !/^[⚙✗]/.test(l) && !/^> (build|·)/.test(l) && !/^Script (started|done)/.test(l) && !/solari_/i.test(l) && !/^Error:/.test(l) && !/^Call log:/.test(l) && !/^waiting for locator/.test(l));
+      // assistant's final prose = lines that are not tool calls, script boilerplate, or TUI chrome
+      const prose = lines.filter(l => !/^[⚙✗→›·>]/.test(l) && !/^Script (started|done)/.test(l) && !/solari_/i.test(l) && !/^Error:/.test(l) && !/^Call log:/.test(l) && !/^waiting for locator/.test(l) && !/^Skill /i.test(l) && !/^(build|plan|·)/.test(l) && l.length > 3);
       const tail = prose.slice(-14).join('\n').slice(0, 1500);
       const m = txt.match(/https:\/\/console\.getsolari\.com\/profiles\/([a-z0-9]+)\/edit/);
       let out;
       if (strongAuth) {
-        out = { status:'needsAuth', needsAuth: /gmail|mail\.google/i.test(txt) ? 'gmail' : 'profile', profileId: m ? m[1] : undefined, loginUrl: m ? m[0] : undefined, hint:'Profile cookies missing or expired — open the Solari console editor, log in, and Save', opencodeOutput: txt.slice(0,3000) };
-      } else if (tail.length > 20) {
+        out = { status:'needsAuth', needsAuth: /gmail|mail\.google/i.test(txt) ? 'gmail' : 'profile', profileId: m ? m[1] : undefined, loginUrl: m ? m[0] : undefined, hint:'Profile cookies expired — user should click Log in in Settings and re-save', opencodeOutput: txt.slice(0,3000) };
+      } else if (tail.length > 60) {
         out = { status:'completed', conclusion: tail };
       } else if (/^\s*✗/m.test(txt)) {
         out = { status:'failed', error:'Browser actions failed — see opencode output', opencodeOutput: txt.slice(0,4000) };
@@ -632,7 +634,8 @@ trace "THOUGHT" "Harness done"
         }, 1200);
       };
       startLiveTrace();
-      const result = await sandbox.commands.run("sh", { args: ["-c", "chmod +x /tmp/run.sh && /tmp/run.sh"], timeoutMs: 600_000 });
+      // no client-side timeout — the harness runs until it finishes
+      const result = await sandbox.commands.run("sh", { args: ["-c", "chmod +x /tmp/run.sh && /tmp/run.sh"] });
       if (traceInterval) clearInterval(traceInterval);
       const logs = [result.stdout?.slice(0, 6000) ?? "", result.stderr?.slice(0, 3000) ?? ""].filter(Boolean);
       let response: string | undefined;
