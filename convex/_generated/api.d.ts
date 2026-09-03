@@ -13,6 +13,7 @@ import type * as messages from "../messages.js";
 import type * as profiles from "../profiles.js";
 import type * as sandboxSessions from "../sandboxSessions.js";
 import type * as users from "../users.js";
+import type * as waitlist from "../waitlist.js";
 
 import type {
   ApiFromModules,
@@ -26,6 +27,7 @@ declare const fullApi: ApiFromModules<{
   profiles: typeof profiles;
   sandboxSessions: typeof sandboxSessions;
   users: typeof users;
+  waitlist: typeof waitlist;
 }>;
 
 /**
