@@ -1,6 +1,6 @@
 import { ConvexHttpClient } from "convex/browser";
 import { z } from "zod";
-import { api } from "../../convex/_generated/api";
+import { api } from "../../../../convex/_generated/api";
 
 const joinSchema = z.object({
   email: z.string().trim().toLowerCase().email().max(254),
