@@ -2,6 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import { ConvexHttpClient } from "convex/browser";
 import { z } from "zod";
 import { api } from "../../../convex/_generated/api";
+import { requireOwner, isResponse } from "../../../lib/owner";
 
 export const maxDuration = 300;
 
@@ -194,6 +195,8 @@ function detectPlatforms(prompt: string): string[] {
 }
 
 export async function POST(req: Request) {
+  const gate = await requireOwner();
+  if (isResponse(gate)) return gate;
   const { userId, getToken } = await auth();
   if (!userId) return Response.json({ error: "Authentication required" }, { status: 401 });
 

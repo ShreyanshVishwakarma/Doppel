@@ -34,6 +34,14 @@ body {
   border-radius: 4px;
 }
 
+/* Text fields already signal focus via their container's border/ring —
+   the global outline reads as a black box inside them. */
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;

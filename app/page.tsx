@@ -1,15 +1,7 @@
 import Link from "next/link";
-import { Show, SignInButton, SignUpButton, UserButton } from "@clerk/nextjs";
+import { Show, SignInButton, UserButton } from "@clerk/nextjs";
 import { OpenDoppelCta } from "@/components/open-doppel-cta";
-
-// ---------- shared tiny icons (no extra deps) ----------
-function ArrowRight() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden>
-      <path d="M6 3l5 5-5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
+import { WaitlistForm } from "@/components/waitlist-form";
 
 export default function Home() {
   return (
@@ -40,17 +32,12 @@ export default function Home() {
                   Sign in
                 </button>
               </SignInButton>
-              <SignUpButton mode="modal">
-                <button className="inline-flex h-9 items-center justify-center rounded-full bg-stone-900 px-5 text-sm font-medium text-white transition hover:bg-stone-800">
-                  Sign up
-                </button>
-              </SignUpButton>
-              <Link
-                href="/onboarding"
-                className="hidden lg:inline-flex h-9 items-center justify-center rounded-full border border-stone-200 bg-white px-5 text-sm font-medium hover:bg-stone-50"
+              <a
+                href="#waitlist"
+                className="inline-flex h-9 items-center justify-center rounded-full bg-stone-900 px-5 text-sm font-medium text-white transition hover:bg-stone-800"
               >
-                Get started
-              </Link>
+                Join waitlist
+              </a>
             </Show>
             <Show when="signed-in">
               <OpenDoppelCta />
@@ -86,22 +73,10 @@ export default function Home() {
 
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <Show when="signed-out">
-                <SignInButton mode="modal">
-                  <button className="inline-flex h-11 items-center gap-2 rounded-full bg-stone-900 px-6 text-sm font-medium text-white shadow-sm transition hover:bg-black">
-                    Start with Doppel <ArrowRight />
-                  </button>
-                </SignInButton>
-                <SignUpButton mode="modal">
-                  <button className="inline-flex h-11 items-center justify-center rounded-full border border-stone-200 bg-white px-6 text-sm font-medium hover:bg-stone-50">
-                    Sign up free
-                  </button>
-                </SignUpButton>
-                <Link
-                  href="/onboarding"
-                  className="text-sm font-medium text-stone-600 underline-offset-4 hover:text-stone-900 hover:underline"
-                >
-                  View onboarding →
-                </Link>
+                <div className="w-full max-w-md">
+                  <WaitlistForm />
+                  <p className="mt-2 text-xs text-stone-500">Private beta — we invite from the waitlist in small batches. Have an invite? <SignInButton mode="modal"><button className="font-medium underline underline-offset-2 hover:text-stone-900">Sign in</button></SignInButton></p>
+                </div>
               </Show>
               <Show when="signed-in">
                 <OpenDoppelCta variant="hero" />
@@ -332,6 +307,19 @@ export default function Home() {
                 </ul>
               </div>
             </div>
+          </div>
+        </div>
+      </section>
+
+      {/* WAITLIST */}
+      <section id="waitlist" className="border-t border-stone-200 bg-white">
+        <div className="mx-auto max-w-2xl px-6 py-14 text-center">
+          <h2 className="text-[22px] font-semibold tracking-tight text-stone-900">Join the waitlist</h2>
+          <p className="mx-auto mt-2 max-w-[55ch] text-sm leading-6 text-stone-600">
+            Doppel is in a private beta — seats are limited while we scale the browser infrastructure. Leave your email and we'll invite you in order.
+          </p>
+          <div className="mx-auto mt-6 max-w-md">
+            <WaitlistForm />
           </div>
         </div>
       </section>

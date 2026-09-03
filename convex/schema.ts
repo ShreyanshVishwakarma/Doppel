@@ -54,6 +54,12 @@ export default defineSchema({
     .index("by_user_platform", ["userId", "platform"])
     .index("by_userId", ["userId"]),
 
+  // Waitlist — public email capture while the product is private
+  waitlist: defineTable({
+    email: v.string(),
+    createdAt: v.number(),
+  }).index("by_email", ["email"]),
+
   // Sandbox harness sessions — one per prompt. Each is a Solari Sandbox
   // that boots from the opencode harness snapshot and streams logs.
   sandboxSessions: defineTable({

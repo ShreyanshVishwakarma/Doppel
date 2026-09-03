@@ -2,6 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import { ConvexHttpClient } from "convex/browser";
 import { z } from "zod";
 import { api } from "../../../../convex/_generated/api";
+import { requireOwner, isResponse } from "../../../../lib/owner";
 
 function getConvex() {
   const url = process.env.NEXT_PUBLIC_CONVEX_URL;
@@ -13,6 +14,8 @@ const killSchema = z.object({ sessionId: z.string().min(1) });
 
 // POST /api/sessions/kill { sessionId } — stop a running sandbox + mark the session stopped.
 export async function POST(req: Request) {
+  const gate = await requireOwner();
+  if (isResponse(gate)) return gate;
   const { userId, getToken } = await auth();
   if (!userId) return Response.json({ error: "Authentication required" }, { status: 401 });
 
