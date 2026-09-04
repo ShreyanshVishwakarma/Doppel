@@ -634,7 +634,7 @@ trace "THOUGHT" "Harness done"
               }
             } catch {}
           } catch {}
-        }, 1200);
+        }, 2500);
       };
       startLiveTrace();
       // no client-side timeout — the harness runs until it finishes

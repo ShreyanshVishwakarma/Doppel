@@ -7,6 +7,22 @@ import { useConvexAuth, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 
 type TraceEvent = { ts: string; type: string; text: string };
+type SessionView = {
+  _id: string;
+  status: string;
+  prompt: string;
+  createdAt: number;
+  updatedAt: number;
+  sandboxId: string;
+  browserSessionId?: string;
+  replayUrl?: string;
+  errorMessage?: string;
+  traceCount: number;
+  snapshotId?: string;
+  trace?: TraceEvent[];
+  response?: string;
+  executionLogs?: string[];
+};
 
 function timeAgo(ms: number) {
   const s = Math.floor((Date.now() - ms) / 1000);
@@ -84,7 +100,7 @@ const EXAMPLES = [
   { label: "LinkedIn outreach", prompt: "open LinkedIn and draft a short outreach message to a hiring manager" },
 ];
 
-function SessionCard({ s, isSel, onClick }: { s: { _id: string; status: string; prompt: string; trace?: TraceEvent[]; browserSessionId?: string; replayUrl?: string; createdAt: number }; isSel: boolean; onClick: () => void }) {
+function SessionCard({ s, isSel, onClick }: { s: { _id: string; status: string; prompt: string; traceCount: number; browserSessionId?: string; replayUrl?: string; createdAt: number }; isSel: boolean; onClick: () => void }) {
   const meta = statusMeta(s.status);
   const isRunning = s.status === "running";
   return (
@@ -99,7 +115,7 @@ function SessionCard({ s, isSel, onClick }: { s: { _id: string; status: string; 
       </div>
       <div className="mt-2 line-clamp-2 text-sm font-medium leading-5 text-stone-900">{s.prompt}</div>
       <div className="mt-2 flex items-center gap-2 text-xs text-stone-500">
-        <span className="inline-flex items-center gap-1.5"><span className="tnum rounded bg-stone-100 px-1.5 py-0.5 font-mono text-[11px]">{s.trace?.length ?? 0} steps</span>{s.browserSessionId ? <span className="text-emerald-700">• browser</span> : <span className="text-stone-400">• no browser</span>}{s.replayUrl ? <span className="text-sky-700">• replay</span> : null}</span>
+        <span className="inline-flex items-center gap-1.5"><span className="tnum rounded bg-stone-100 px-1.5 py-0.5 font-mono text-[11px]">{s.traceCount} steps</span>{s.browserSessionId ? <span className="text-emerald-700">• browser</span> : <span className="text-stone-400">• no browser</span>}{s.replayUrl ? <span className="text-sky-700">• replay</span> : null}</span>
       </div>
     </button>
   );
@@ -149,8 +165,9 @@ function PromptForm({ compact, input, setInput, runState, runError, onSubmit, di
 export default function DashboardPage() {
   const { user } = useUser();
   const { isAuthenticated, isLoading } = useConvexAuth();
-  const profile = useQuery(api.profiles.getMyProfileWithUrls, isAuthenticated ? {} : "skip");
-  const sessions = useQuery(api.sandboxSessions.listMine, isAuthenticated ? {} : "skip");
+  // Lightweight profile check + summary list: keeps reactive egress tiny.
+  const profile = useQuery(api.profiles.getMyProfile, isAuthenticated ? {} : "skip");
+  const sessions = useQuery(api.sandboxSessions.listMineSummary, isAuthenticated ? {} : "skip");
 
   const [input, setInput] = useState("");
   const [runState, setRunState] = useState<"idle" | "running">("idle");
@@ -160,6 +177,13 @@ export default function DashboardPage() {
   const [showTech, setShowTech] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [pending, setPending] = useState<{ prompt: string } | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+
+  // Heavy payload (trace, response, logs) only for the session on screen.
+  const detail = useQuery(
+    api.sandboxSessions.getDetail,
+    isAuthenticated && selectedId && !composing ? ({ id: selectedId } as never) : "skip"
+  );
 
   async function handleStop() {
     if (!selected || stopping) return;
@@ -175,11 +199,14 @@ export default function DashboardPage() {
     }
   }
 
-  const selected = useMemo(() => {
-    if (!sessions?.length) return null;
-    if (selectedId) return sessions.find((s) => s._id === selectedId) ?? sessions[0];
-    return sessions[0];
-  }, [sessions, selectedId]);
+  const selected = useMemo<SessionView | null>(() => {
+    // Prefer the loaded detail (fresh sessions may lag in the summary list).
+    if (selectedId && detail && detail._id === selectedId) {
+      const summary = sessions?.find((s) => s._id === selectedId);
+      return { ...(summary ?? {}), ...detail, traceCount: detail.trace?.length ?? 0 } as SessionView;
+    }
+    return sessions?.find((s) => s._id === selectedId) ?? null;
+  }, [sessions, selectedId, detail]);
 
   const traceScrollRef = useRef<HTMLDivElement>(null);
   const traceEndRef = useRef<HTMLDivElement>(null);
@@ -255,7 +282,7 @@ export default function DashboardPage() {
   return (
     <div className="flex h-screen overflow-hidden bg-[#fafaf9]">
       {/* ============ SIDEBAR ============ */}
-      <aside className="hidden w-[280px] shrink-0 flex-col border-r border-stone-200 bg-white md:flex">
+      <aside className={`hidden shrink-0 flex-col overflow-hidden border-r border-stone-200 bg-white transition-all duration-200 md:flex ${sidebarOpen ? "w-[280px]" : "w-0 border-r-0"}`}>
         {/* top: brand + new session */}
         <div className="px-4 pb-3 pt-4">
           <div className="flex items-center justify-between">
@@ -308,6 +335,18 @@ export default function DashboardPage() {
 
       {/* ============ MAIN WORKSPACE ============ */}
       <main className="relative flex min-w-0 flex-1 flex-col">
+        {/* sidebar toggle (desktop) */}
+        <button
+          onClick={() => setSidebarOpen((v) => !v)}
+          aria-label={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
+          className="absolute left-2 top-2 z-30 hidden h-8 w-8 items-center justify-center rounded-lg border border-stone-200 bg-white text-stone-600 shadow-sm transition hover:border-stone-300 hover:text-stone-900 active:scale-[0.98] md:flex"
+        >
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden>
+            <rect x="1.5" y="2.5" width="13" height="11" rx="2" stroke="currentColor" strokeWidth="1.4" />
+            <path d="M6 2.5v11" stroke="currentColor" strokeWidth="1.4" className={sidebarOpen ? "" : "opacity-30"} />
+          </svg>
+        </button>
+
         {/* mobile top bar */}
         <div className="flex items-center justify-between border-b border-stone-200 bg-white px-4 py-3 md:hidden">
           <Link href="/" className="flex items-center gap-2">
@@ -384,7 +423,7 @@ export default function DashboardPage() {
           <>
             {/* scrollable canvas */}
             <div className="min-h-0 flex-1 overflow-auto">
-              <div className="mx-auto w-full max-w-[850px] px-4 pt-6 sm:px-6">
+              <div className="mx-auto w-full max-w-[850px] px-4 pt-14 sm:px-6">
                 {/* header */}
                 <div className="flex flex-wrap items-center gap-2">
                   <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold ${selectedMeta!.pill}`}>

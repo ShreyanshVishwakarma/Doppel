@@ -25,7 +25,9 @@ export const create = mutation({
       sandboxId: args.sandboxId,
       snapshotId: args.snapshotId,
       prompt,
-      markdown: args.markdown,
+      // The sandbox reads the full markdown from /tmp/prompt.md; this copy is a
+      // reference slice only. Capping it keeps reactive re-sends cheap.
+      markdown: args.markdown.slice(0, 4000),
       status: "running",
       executionLogs: [`Sandbox ${args.sandboxId} started from ${args.snapshotId}`],
       createdAt: now,
@@ -93,16 +95,57 @@ export const updateBySandboxId = mutation({
   },
 });
 
-export const listMine = query({
+// Lightweight list for the sidebar: no markdown, no trace, no response, no logs.
+// A full 20-row payload here is ~2KB instead of ~2MB, which matters because this
+// query re-sends reactively on every trace update during a run.
+export const listMineSummary = query({
   args: {},
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return [];
-    return await ctx.db
+    const rows = await ctx.db
       .query("sandboxSessions")
       .withIndex("by_userId", (q) => q.eq("userId", identity.subject))
       .order("desc")
       .take(20);
+    return rows.map((s) => ({
+      _id: s._id,
+      status: s.status,
+      prompt: s.prompt.slice(0, 200),
+      createdAt: s.createdAt,
+      updatedAt: s.updatedAt ?? s.createdAt,
+      sandboxId: s.sandboxId,
+      browserSessionId: s.browserSessionId,
+      replayUrl: s.replayUrl,
+      errorMessage: s.errorMessage,
+      traceCount: s.trace?.length ?? 0,
+    }));
+  },
+});
+
+// Full detail (trace, response, logs) for ONE session — the one on screen.
+export const getDetail = query({
+  args: { id: v.id("sandboxSessions") },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Not authenticated");
+    const s = await ctx.db.get(args.id);
+    if (!s || s.userId !== identity.subject) throw new Error("Not found");
+    return {
+      _id: s._id,
+      status: s.status,
+      prompt: s.prompt,
+      createdAt: s.createdAt,
+      updatedAt: s.updatedAt ?? s.createdAt,
+      sandboxId: s.sandboxId,
+      snapshotId: s.snapshotId,
+      browserSessionId: s.browserSessionId,
+      replayUrl: s.replayUrl,
+      errorMessage: s.errorMessage,
+      trace: s.trace,
+      response: s.response,
+      executionLogs: s.executionLogs,
+    };
   },
 });
 
