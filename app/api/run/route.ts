@@ -1,4 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
+import { after } from "next/server";
 import { ConvexHttpClient } from "convex/browser";
 import { z } from "zod";
 import { api } from "../../../convex/_generated/api";
@@ -366,10 +367,29 @@ export async function POST(req: Request) {
     });
   } catch {}
 
-  // Fire-and-forget harness execution
-  void (async () => {
+  // Background harness execution. NOTE: this MUST use after(), not a bare
+  // fire-and-forget promise — Vercel freezes the function after the response
+  // is returned, so `void (async()=>{})` never runs past `return` below
+  // (sandbox VM gets created, session row stays at 1 log line, 0 steps forever).
+  // after() keeps the function alive up to maxDuration. The Clerk token is
+  // captured up front because getToken() needs the request context, which is
+  // gone once after() runs.
+  const convexToken = token;
+  const bgConvex = () => {
+    const c = getConvex();
+    c.setAuth(convexToken);
+    return c;
+  };
+  after(async () => {
     let traceInterval: ReturnType<typeof setInterval> | undefined;
     try {
+      // Immediate heartbeat so the dashboard leaves "Booting" within seconds.
+      try {
+        await bgConvex().mutation(api.sandboxSessions.update, {
+          id: sessionId as never,
+          logs: ["Harness worker started — connecting to sandbox"],
+        } as never);
+      } catch {}
       await sandbox.connect().catch(() => {});
       // Write task files — avoid shell interpolation for secrets
       await sandbox.files.write("/tmp/prompt.md", markdownFull);
@@ -612,12 +632,9 @@ trace "THOUGHT" "Harness done"
             const hash = `${trace.length}:${trace.length ? JSON.stringify(trace[trace.length - 1]) : ""}`;
             if (trace.length && hash !== lastTraceHash) {
               lastTraceHash = hash;
-              const t2 = await getToken({ template: "convex" }).catch(() => null);
-              if (t2) {
-                const convex2 = getConvex();
-                convex2.setAuth(t2);
-                await convex2.mutation(api.sandboxSessions.update, { id: sessionId as never, trace } as never);
-              }
+              try {
+                await bgConvex().mutation(api.sandboxSessions.update, { id: sessionId as never, trace } as never);
+              } catch {}
             }
             // push browserId/replayUrl exactly once each
             if (!browserIdPushed) {
@@ -625,12 +642,9 @@ trace "THOUGHT" "Harness done"
                 const bid = (await sandbox.files.readText("/tmp/browser_id.txt")).trim();
                 if (bid) {
                   browserIdPushed = true;
-                  const t2b = await getToken({ template: "convex" }).catch(() => null);
-                  if (t2b) {
-                    const convex2 = getConvex();
-                    convex2.setAuth(t2b);
-                    await convex2.mutation(api.sandboxSessions.update, { id: sessionId as never, browserSessionId: bid } as never);
-                  }
+                  try {
+                    await bgConvex().mutation(api.sandboxSessions.update, { id: sessionId as never, browserSessionId: bid } as never);
+                  } catch {}
                 }
               } catch {}
             }
@@ -639,12 +653,9 @@ trace "THOUGHT" "Harness done"
                 const rurl = (await sandbox.files.readText("/tmp/replay_url.txt")).trim();
                 if (rurl) {
                   replayUrlPushed = true;
-                  const t2c = await getToken({ template: "convex" }).catch(() => null);
-                  if (t2c) {
-                    const convex2 = getConvex();
-                    convex2.setAuth(t2c);
-                    await convex2.mutation(api.sandboxSessions.update, { id: sessionId as never, replayUrl: rurl } as never);
-                  }
+                  try {
+                    await bgConvex().mutation(api.sandboxSessions.update, { id: sessionId as never, replayUrl: rurl } as never);
+                  } catch {}
                 }
               } catch {}
             }
@@ -727,11 +738,8 @@ trace "THOUGHT" "Harness done"
           finalResponse = JSON.stringify(j).slice(0, 8000);
         } catch {}
       }
-      const convex2 = getConvex();
-      const t2 = await getToken({ template: "convex" }).catch(() => null);
-      if (t2) {
-        convex2.setAuth(t2);
-        await convex2.mutation(api.sandboxSessions.update, {
+      try {
+        await bgConvex().mutation(api.sandboxSessions.update, {
           id: sessionId as never,
           status: finalStatus,
           logs: logs.length ? logs : ["Harness completed"],
@@ -741,26 +749,21 @@ trace "THOUGHT" "Harness done"
           replayUrl,
           errorMessage: needsInput ? needsInput : undefined,
         } as never);
-      }
+      } catch {}
       await sandbox.kill().catch(() => {});
     } catch (err) {
       if (traceInterval) clearInterval(traceInterval);
       try {
-        const t2 = await getToken({ template: "convex" }).catch(() => null);
-        if (t2) {
-          const convex2 = getConvex();
-          convex2.setAuth(t2);
-          await convex2.mutation(api.sandboxSessions.update, {
-            id: sessionId as never,
-            status: "failed",
-            logs: [(err as Error).message.slice(0, 2000)],
-            errorMessage: (err as Error).message.slice(0, 800),
-          } as never);
-        }
+        await bgConvex().mutation(api.sandboxSessions.update, {
+          id: sessionId as never,
+          status: "failed",
+          logs: [(err as Error).message.slice(0, 2000)],
+          errorMessage: (err as Error).message.slice(0, 800),
+        } as never);
       } catch {}
       await sandbox.kill().catch(() => {});
     }
-  })();
+  });
 
   return Response.json({ sessionId, sandboxId: sandbox.id, snapshotId, status: "running", profilesUsed: profileMap, profileWarnings: profileWarnings.length ? profileWarnings : undefined });
 }
