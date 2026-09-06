@@ -238,6 +238,9 @@ export default function DashboardPage() {
     } catch (err) {
       setRunError(err instanceof Error ? err.message : "Failed");
       setPending(null);
+      // Back to the composer: other branches assume selected exists here, and
+      // the new sessionId hasn't landed yet, so selected stays null.
+      setSelectedId(null);
       setInput(text); // restore the text so nothing is lost
       setComposing(true);
     } finally {
@@ -445,16 +448,16 @@ export default function DashboardPage() {
                   </div>
                 )}
                 <button onClick={() => setShowTech((v) => !v)} className="mt-2 text-xs font-medium text-stone-500 transition hover:text-stone-700">
-                  {showTech ? "Hide details" : "Show details"} • {(selected.sandboxId ?? "").slice(0, 14)}…
+                  {showTech ? "Hide details" : "Show details"} • {selected && (selected.sandboxId ?? "").slice(0, 14)}…
                 </button>
-                {showTech && (
-                  <div className="mt-2 rounded-lg border border-stone-200 bg-stone-50 p-2.5 font-mono text-xs leading-4 text-stone-600 break-all">
-                    <div>sandbox {selected.sandboxId}</div>
-                    {selected.snapshotId && <div>snapshot {selected.snapshotId}</div>}
-                    {selected.browserSessionId && <div>browser {selected.browserSessionId}</div>}
-                    <div>convex {selected._id}</div>
-                  </div>
-                )}
+                {showTech && selected && (
+                    <div className="mt-2 rounded-lg border border-stone-200 bg-stone-50 p-2.5 font-mono text-xs leading-4 text-stone-600 break-all">
+                      <div>sandbox {selected.sandboxId}</div>
+                      {selected.snapshotId && <div>snapshot {selected.snapshotId}</div>}
+                      {selected.browserSessionId && <div>browser {selected.browserSessionId}</div>}
+                      <div>convex {selected._id}</div>
+                    </div>
+                  )}
 
                 {/* timeline */}
                 <div className="mt-8">
