@@ -445,12 +445,12 @@ export default function DashboardPage() {
                   </div>
                 )}
                 <button onClick={() => setShowTech((v) => !v)} className="mt-2 text-xs font-medium text-stone-500 transition hover:text-stone-700">
-                  {showTech ? "Hide details" : "Show details"} • {selected.sandboxId.slice(0, 14)}…
+                  {showTech ? "Hide details" : "Show details"} • {(selected.sandboxId ?? "").slice(0, 14)}…
                 </button>
                 {showTech && (
                   <div className="mt-2 rounded-lg border border-stone-200 bg-stone-50 p-2.5 font-mono text-xs leading-4 text-stone-600 break-all">
                     <div>sandbox {selected.sandboxId}</div>
-                    <div>snapshot {selected.snapshotId}</div>
+                    {selected.snapshotId && <div>snapshot {selected.snapshotId}</div>}
                     {selected.browserSessionId && <div>browser {selected.browserSessionId}</div>}
                     <div>convex {selected._id}</div>
                   </div>
