@@ -569,6 +569,9 @@ trace "THOUGHT" "Harness done"
 
       const startLiveTrace = () => {
         let llmSeen = 0;
+        let lastTraceHash = "";
+        let browserIdPushed = false;
+        let replayUrlPushed = false;
         // Parse opencode's raw transcript for browser tool calls so the dashboard
         // shows what the LLM is doing in real time, not just harness-level events.
         const parseLlmEvents = (raw: string) => {
@@ -604,7 +607,11 @@ trace "THOUGHT" "Harness done"
               const rawOut = await sandbox.files.readText("/tmp/opencode.raw");
               trace.push(...parseLlmEvents(rawOut));
             } catch {}
-            if (trace.length) {
+            // Only write when content actually changed; skip cycles where the
+            // trace is idle (unchanged payload = pure billed egress, no value).
+            const hash = `${trace.length}:${trace.length ? JSON.stringify(trace[trace.length - 1]) : ""}`;
+            if (trace.length && hash !== lastTraceHash) {
+              lastTraceHash = hash;
               const t2 = await getToken({ template: "convex" }).catch(() => null);
               if (t2) {
                 const convex2 = getConvex();
@@ -612,29 +619,37 @@ trace "THOUGHT" "Harness done"
                 await convex2.mutation(api.sandboxSessions.update, { id: sessionId as never, trace } as never);
               }
             }
-            // also push browserId/replayUrl opportunistically
-            try {
-              const bid = (await sandbox.files.readText("/tmp/browser_id.txt")).trim();
-              const t2b = await getToken({ template: "convex" }).catch(() => null);
-              if (bid && t2b) {
-                const convex2 = getConvex();
-                convex2.setAuth(t2b);
-                await convex2.mutation(api.sandboxSessions.update, { id: sessionId as never, browserSessionId: bid } as never);
-              }
-            } catch {}
-            try {
-              const rurl = (await sandbox.files.readText("/tmp/replay_url.txt")).trim();
-              if (rurl) {
-                const t2c = await getToken({ template: "convex" }).catch(() => null);
-                if (t2c) {
-                  const convex2 = getConvex();
-                  convex2.setAuth(t2c);
-                  await convex2.mutation(api.sandboxSessions.update, { id: sessionId as never, replayUrl: rurl } as never);
+            // push browserId/replayUrl exactly once each
+            if (!browserIdPushed) {
+              try {
+                const bid = (await sandbox.files.readText("/tmp/browser_id.txt")).trim();
+                if (bid) {
+                  browserIdPushed = true;
+                  const t2b = await getToken({ template: "convex" }).catch(() => null);
+                  if (t2b) {
+                    const convex2 = getConvex();
+                    convex2.setAuth(t2b);
+                    await convex2.mutation(api.sandboxSessions.update, { id: sessionId as never, browserSessionId: bid } as never);
+                  }
                 }
-              }
-            } catch {}
+              } catch {}
+            }
+            if (!replayUrlPushed) {
+              try {
+                const rurl = (await sandbox.files.readText("/tmp/replay_url.txt")).trim();
+                if (rurl) {
+                  replayUrlPushed = true;
+                  const t2c = await getToken({ template: "convex" }).catch(() => null);
+                  if (t2c) {
+                    const convex2 = getConvex();
+                    convex2.setAuth(t2c);
+                    await convex2.mutation(api.sandboxSessions.update, { id: sessionId as never, replayUrl: rurl } as never);
+                  }
+                }
+              } catch {}
+            }
           } catch {}
-        }, 2500);
+        }, 5000);
       };
       startLiveTrace();
       // no client-side timeout — the harness runs until it finishes
