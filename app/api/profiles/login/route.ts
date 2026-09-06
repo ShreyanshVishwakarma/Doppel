@@ -38,8 +38,8 @@ export async function POST(req: Request) {
   const mapping = await convex.query(api.browserProfiles.getForUser, { platform: parsed.data.platform }).catch(() => null);
   if (!mapping) return Response.json({ error: `No profile connected for ${parsed.data.platform} — connect it first` }, { status: 404 });
 
-  const { Solari } = await import("@solarisdk/browser");
-  const client = new Solari({ apiKey, baseUrl: "https://api.getsolari.com" });
+  // (No SDK import: plain REST avoids pulling patchright-core into the
+  // serverless bundle. The login-handoff call is plain HTTP anyway.)
   const res = await fetch(`https://api.getsolari.com/profiles/${encodeURIComponent(mapping.solariProfileId)}/login-handoff`, {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },

@@ -38,13 +38,15 @@ export async function GET() {
     return Response.json({ error: `Convex read failed: ${(e as Error).message}` }, { status: 503 });
   }
 
-  // Also list raw Solari profiles for this API key (account-scoped)
+  // Also list raw Solari profiles for this API key (account-scoped).
+  // Plain REST: importing the SDK here would pull patchright-core into the
+  // serverless bundle (it needs a browsers.json asset that doesn't survive).
   let solariProfiles: Array<{ id: string; name: string }> = [];
   try {
-    const { Solari } = await import("@solarisdk/browser");
-    const client = new Solari({ apiKey, baseUrl: "https://api.getsolari.com" });
-    const list = await (client.profiles.list as () => Promise<Array<{ id: string; name: string }>>)();
-    solariProfiles = list;
+    const res = await fetch("https://api.getsolari.com/profiles", {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    if (res.ok) solariProfiles = (await res.json()) as typeof solariProfiles;
   } catch {
     // non-fatal — Convex mapping is source of truth
   }
@@ -76,13 +78,22 @@ export async function POST(req: Request) {
   const convex = getConvex();
   convex.setAuth(token);
 
-  // Create profile on Solari
+  // Create profile on Solari — but skip importing the SDK: its transitive
+  // patchright-core/browsers.json asset doesn't survive serverless bundling,
+  // and this operation is a plain REST call. Fetch it directly.
   let solariProfile: { id: string; name: string };
   try {
-    const { Solari } = await import("@solarisdk/browser");
-    const client = new Solari({ apiKey, baseUrl: "https://api.getsolari.com" });
     const name = parsed.data.name ?? `${platform}-${userId.slice(0, 6)}`;
-    solariProfile = await client.profiles.create({ name });
+    const res = await fetch("https://api.getsolari.com/profiles", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      throw new Error(`${res.status} ${txt.slice(0, 200)}`);
+    }
+    solariProfile = (await res.json()) as { id: string; name: string };
   } catch (e) {
     return Response.json({ error: `Solari profile create failed: ${(e as Error).message}` }, { status: 502 });
   }
@@ -132,9 +143,10 @@ export async function DELETE(req: Request) {
   const solariId: string | undefined = mapping?.solariProfileId;
   if (solariId) {
     try {
-      const { Solari } = await import("@solarisdk/browser");
-      const client = new Solari({ apiKey, baseUrl: "https://api.getsolari.com" });
-      await (client.profiles.delete as (id: string) => Promise<void>)(solariId);
+      await fetch(`https://api.getsolari.com/profiles/${encodeURIComponent(solariId)}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${apiKey}` },
+      });
     } catch {}
   }
   // Mark needs_reauth instead of deleting row so UI keeps platform entry
