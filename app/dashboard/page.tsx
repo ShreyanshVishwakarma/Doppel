@@ -89,6 +89,7 @@ function TraceDot({ type, active }: { type: string; active?: boolean }) {
 function statusMeta(s: string) {
   if (s === "completed") return { label: "Completed", dot: "bg-emerald-600", pill: "bg-stone-100 text-stone-600 border-stone-200" };
   if (s === "running") return { label: "Running", dot: "bg-amber-600 animate-pulse", pill: "bg-stone-100 text-stone-700 border-stone-200" };
+  if (s === "creating") return { label: "Starting", dot: "bg-amber-600 animate-pulse", pill: "bg-stone-100 text-stone-700 border-stone-200" };
   if (s === "failed") return { label: "Failed", dot: "bg-red-500/80", pill: "bg-stone-100 text-stone-600 border-stone-200" };
   if (s === "paused") return { label: "Needs action", dot: "bg-sky-600", pill: "bg-stone-100 text-stone-700 border-stone-200" };
   return { label: s, dot: "bg-stone-400", pill: "bg-stone-100 text-stone-600 border-stone-200" };
@@ -188,8 +189,9 @@ export default function DashboardPage() {
   async function handleStop() {
     if (!selected || stopping) return;
     setStopping(true);
+    const targetId = selected._id;
     try {
-      const res = await fetch("/api/sessions/kill", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: selected._id }) });
+      const res = await fetch("/api/sessions/kill", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: targetId }) });
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
         setRunError(d.error ?? "We couldn't stop that session");
@@ -448,16 +450,18 @@ export default function DashboardPage() {
                   </div>
                 )}
                 <button onClick={() => setShowTech((v) => !v)} className="mt-2 text-xs font-medium text-stone-500 transition hover:text-stone-700">
-                  {showTech ? "Hide details" : "Show details"} • {selected && (selected.sandboxId ?? "").slice(0, 14)}…
+                  {showTech ? "Hide details" : "Show details"} • {selected.sandboxId ? selected.sandboxId.slice(0, 14) + "…" : "session starting…"}
                 </button>
-                {showTech && selected && (
-                    <div className="mt-2 rounded-lg border border-stone-200 bg-stone-50 p-2.5 font-mono text-xs leading-4 text-stone-600 break-all">
-                      <div>sandbox {selected.sandboxId}</div>
-                      {selected.snapshotId && <div>snapshot {selected.snapshotId}</div>}
-                      {selected.browserSessionId && <div>browser {selected.browserSessionId}</div>}
-                      <div>convex {selected._id}</div>
-                    </div>
-                  )}
+                {showTech && selected && selected.sandboxId ? (
+                  <div className="mt-2 rounded-lg border border-stone-200 bg-stone-50 p-2.5 font-mono text-xs leading-4 text-stone-600 break-all">
+                    <div>sandbox {selected.sandboxId}</div>
+                    {selected.snapshotId && <div>snapshot {selected.snapshotId}</div>}
+                    {selected.browserSessionId && <div>browser {selected.browserSessionId}</div>}
+                    <div>convex {selected._id}</div>
+                  </div>
+                ) : showTech ? (
+                  <div className="mt-2 rounded-lg border border-stone-200 bg-stone-50 p-2.5 text-xs text-stone-500">Session id {selected._id} — sandbox info will appear once it boots.</div>
+                ) : null}
 
                 {/* timeline */}
                 <div className="mt-8">
