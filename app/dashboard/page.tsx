@@ -33,27 +33,38 @@ function timeAgo(ms: number) {
 }
 
 function cleanTraceText(t: string) {
-  // LLM tool-call events streamed from opencode
-  const tool = t.match(/(FAILED — )?solari_(browser_\w+)\s*(\{.*)?$/);
-  if (tool) {
+  // LLM tool-call events streamed from opencode. The TUI line may or may not
+  // carry the solari_ prefix, and args may be JSON or trailing free text.
+  const tool = t.match(/(FAILED — )?(?:solari_)?(browser_\w+)\s*(\{.*\})?\s*(.*)$/);
+  if (tool && /browser_\w+/.test(t)) {
     const fail = tool[1] ? "✗ " : "";
-    const name = tool[2];
+    const name = "solari_" + tool[2];
     let detail = "";
-    try { detail = tool[3] ? String(JSON.parse(tool[3]).url ?? JSON.parse(tool[3]).selector ?? JSON.parse(tool[3]).key ?? JSON.parse(tool[3]).profileId ?? "") : ""; } catch {}
+    if (tool[3]) {
+      try {
+        const a = JSON.parse(tool[3]);
+        detail = String(a.url ?? a.selector ?? a.key ?? a.profileId ?? a.text ?? "");
+      } catch { detail = ""; }
+    }
+    if (!detail && tool[4]) detail = tool[4].trim();
+    if (!detail) {
+      const url = t.match(/https?:\/\/[^\s"'\)]+/);
+      if (url) detail = url[0];
+    }
     const shortUrl = detail.replace(/^https?:\/\/(www\.)?/, "").slice(0, 60);
     const verb: Record<string, string> = {
-      solari_browser_create: "Opening browser" + (detail ? " with profile " + detail.slice(0, 20) : " (no profile)"),
+      solari_browser_create: "Opening browser" + (detail ? " with profile " + detail.slice(0, 20) : ""),
       solari_browser_navigate: "Opening " + (shortUrl || "page"),
       solari_browser_read_page: "Reading page",
       solari_browser_screenshot: "Taking screenshot",
       solari_browser_click: "Clicking " + (shortUrl || "element"),
-      solari_browser_type: "Typing…",
+      solari_browser_type: "Typing" + (detail && !shortUrl ? ` "${detail.slice(0, 80)}"` : "…"),
       solari_browser_key: "Pressing " + (detail || "key"),
       solari_browser_evaluate: "Running page script",
       solari_browser_close: "Closing browser",
       solari_browser_replay_url: "Fetching replay",
     };
-    return fail + (verb[name] ?? name);
+    return fail + (verb[name] ?? name.replace(/^solari_/, "").replace(/_/g, " "));
   }
   // hide raw JSON noise
   if (t.includes('"needed"') && t.includes('"allActive"')) {
@@ -93,6 +104,55 @@ function statusMeta(s: string) {
   if (s === "failed") return { label: "Failed", dot: "bg-red-500/80", pill: "bg-stone-100 text-stone-600 border-stone-200" };
   if (s === "paused") return { label: "Needs action", dot: "bg-sky-600", pill: "bg-stone-100 text-stone-700 border-stone-200" };
   return { label: s, dot: "bg-stone-400", pill: "bg-stone-100 text-stone-600 border-stone-200" };
+}
+
+// Harness-internal chatter (boot banners, byte counts, verification JSON).
+// Shown collapsed under "Setup", never mixed with the browser story.
+function isSetupEvent(e: TraceEvent) {
+  const t = e.text;
+  const u = e.type.toUpperCase();
+  return (
+    u.includes("KNOWLEDGE") ||
+    /Harness booted/.test(t) ||
+    /Spawning opencode harness/.test(t) ||
+    /opencode exit \d+ raw/.test(t) ||
+    /Profile verification:/.test(t) ||
+    /Harness done/.test(t)
+  );
+}
+
+function formatDuration(ms: number) {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${s % 60}s`;
+  return `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
+function summarizeTrace(trace: TraceEvent[]) {
+  let failed = 0;
+  let browserOps = 0;
+  for (const e of trace) {
+    if (e.text.startsWith("FAILED — ")) failed++;
+    if (/(?:solari_)?browser_\w+/.test(e.text)) browserOps++;
+  }
+  return { failed, browserOps };
+}
+
+type ParsedResponse = Record<string, unknown> | null;
+
+function parseResponse(response?: string): ParsedResponse {
+  if (!response) return null;
+  try {
+    const j = JSON.parse(response);
+    return j && typeof j === "object" ? (j as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+function str(v: unknown) {
+  return typeof v === "string" ? v : "";
 }
 
 const EXAMPLES = [
@@ -163,6 +223,139 @@ function PromptForm({ compact, input, setInput, runState, runError, onSubmit, di
   );
 }
 
+function ResultCard({ response, status, replayUrl }: { response?: string; status: string; replayUrl?: string }) {
+  const running = status === "running" || status === "creating";
+  if (!response) {
+    if (running) {
+      return (
+        <div className="space-y-2 rounded-xl border border-stone-200 bg-white p-4">
+          <div className="h-3 w-1/3 animate-pulse rounded-full bg-stone-200" />
+          <div className="h-3 w-2/3 animate-pulse rounded-full bg-stone-200/80" />
+          <div className="h-3 w-1/2 animate-pulse rounded-full bg-stone-200/60" />
+        </div>
+      );
+    }
+    return <div className="rounded-xl border border-stone-200 bg-stone-50 p-4 text-sm text-stone-600">No result yet.</div>;
+  }
+
+  const parsed = parseResponse(response);
+
+  // Plain prose (not JSON) — render as text, never in a code block.
+  if (!parsed) {
+    return (
+      <div className="rounded-xl border border-stone-200 bg-white p-4">
+        <p className="whitespace-pre-wrap text-sm leading-6 text-stone-800">{response.slice(0, 4000)}</p>
+        {replayUrl && <a href={replayUrl} target="_blank" className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-stone-700 underline">Watch replay →</a>}
+      </div>
+    );
+  }
+
+  const statusVal = str(parsed.status).toLowerCase();
+  const action = str(parsed.action).toLowerCase();
+  const needsAuth = str(parsed.needsAuth);
+  const isSent =
+    parsed.sent === true ||
+    action === "email_sent" ||
+    str(parsed.conclusion).includes("Email sent");
+
+  // Login expired — the one result that needs the user to DO something.
+  if (needsAuth || statusVal === "needsaauth" || statusVal === "needsauth") {
+    return (
+      <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+        <div className="flex items-center gap-2 text-amber-900"><span className="text-sm font-bold">Login needed for {needsAuth || "the site"}</span></div>
+        <p className="mt-1.5 text-sm leading-6 text-amber-900/90">{str(parsed.hint) || "Reconnect the profile, then re-run."}</p>
+        <Link href="/settings" className="mt-3 inline-flex rounded-full bg-stone-900 px-4 py-1.5 text-xs font-semibold text-white transition hover:bg-black">Fix in Settings →</Link>
+      </div>
+    );
+  }
+
+  // Email sent — render like an email, not a payload.
+  if (isSent) {
+    const to = str(parsed.to || parsed.recipient);
+    const subject = str(parsed.subject);
+    const body = str(parsed.body_preview || parsed.body || parsed.conclusion);
+    return (
+      <div className="overflow-hidden rounded-xl border border-emerald-200 bg-white">
+        <div className="flex flex-wrap items-center gap-2 bg-emerald-50 px-4 py-3">
+          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-600 text-xs text-white">✓</span>
+          <span className="text-sm font-bold text-emerald-900">Email sent</span>
+          {to && <span className="text-xs text-emerald-700">to {to}</span>}
+          {replayUrl && <a href={replayUrl} target="_blank" className="ml-auto text-xs font-semibold text-emerald-700 underline">Watch replay →</a>}
+        </div>
+        {(to || subject) && (
+          <div className="space-y-1 border-b border-stone-100 px-4 py-3 text-sm">
+            {to && <div className="flex gap-2"><span className="w-14 shrink-0 text-xs font-medium text-stone-400">To</span><span className="break-all font-mono text-xs font-semibold text-stone-800">{to}</span></div>}
+            {subject && <div className="flex gap-2"><span className="w-14 shrink-0 text-xs font-medium text-stone-400">Subject</span><span className="font-medium text-stone-800">{subject}</span></div>}
+          </div>
+        )}
+        {body && (
+          <div className="max-h-[320px] overflow-auto px-4 py-3">
+            <p className="whitespace-pre-wrap text-sm leading-6 text-stone-800">{body.slice(0, 4000)}</p>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Email found (lookup tasks).
+  if (parsed.email && typeof parsed.email === "string") {
+    return (
+      <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+        <div className="flex items-center gap-2 text-emerald-800"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-600 text-xs text-white">✓</span><span className="text-xs font-bold tracking-widest">EMAIL FOUND</span></div>
+        <div className="mt-2 break-all font-mono text-sm font-semibold text-emerald-900">{String(parsed.email)}</div>
+        {typeof parsed.source === "string" && <div className="mt-1 text-xs text-emerald-700">via {String(parsed.source)}</div>}
+      </div>
+    );
+  }
+
+  // Successful completion with prose.
+  const conclusion = str(parsed.conclusion || parsed.response || parsed.title);
+  if ((statusVal === "completed" || statusVal === "success") && conclusion) {
+    return (
+      <div className="rounded-xl border border-emerald-200 bg-white">
+        <div className="flex flex-wrap items-center gap-2 bg-emerald-50 px-4 py-3">
+          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-600 text-xs text-white">✓</span>
+          <span className="text-xs font-bold tracking-widest text-emerald-900">COMPLETED</span>
+          {replayUrl && <a href={replayUrl} target="_blank" className="ml-auto text-xs font-semibold text-emerald-700 underline">Watch replay →</a>}
+        </div>
+        <div className="max-h-[320px] overflow-auto px-4 py-3">
+          <p className="whitespace-pre-wrap text-sm leading-6 text-stone-800">{conclusion.slice(0, 3000)}</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Failure — plain language, no payload.
+  const err = str(parsed.error || parsed.errorMessage || parsed.hint);
+  if (statusVal === "failed" || err) {
+    return (
+      <div className="rounded-xl border border-red-200 bg-red-50 p-4">
+        <div className="text-sm font-bold text-red-800">Didn&apos;t finish</div>
+        {err && <p className="mt-1 text-sm leading-6 text-red-800/90">{err.slice(0, 800)}</p>}
+        <p className="mt-2 text-xs text-red-700/70">Check the timeline above to see where it stopped, then re-run.</p>
+      </div>
+    );
+  }
+
+  // Unknown shape — key facts as rows, never a JSON blob.
+  const rows = Object.entries(parsed)
+    .filter(([, v]) => typeof v === "string" || typeof v === "number" || typeof v === "boolean")
+    .slice(0, 8);
+  return (
+    <div className="rounded-xl border border-stone-200 bg-white p-4">
+      <div className="space-y-1.5 text-sm">
+        {rows.map(([k, v]) => (
+          <div key={k} className="flex gap-2">
+            <span className="w-28 shrink-0 text-xs font-medium capitalize text-stone-400">{k.replace(/_/g, " ")}</span>
+            <span className="min-w-0 break-words text-stone-800">{String(v).slice(0, 500)}</span>
+          </div>
+        ))}
+      </div>
+      {replayUrl && <a href={replayUrl} target="_blank" className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-stone-700 underline">Watch replay →</a>}
+    </div>
+  );
+}
+
 export default function DashboardPage() {
   const { user } = useUser();
   const { isAuthenticated, isLoading } = useConvexAuth();
@@ -209,6 +402,14 @@ export default function DashboardPage() {
     }
     return sessions?.find((s) => s._id === selectedId) ?? null;
   }, [sessions, selectedId, detail]);
+
+  // Split harness setup chatter from the browser story the user cares about.
+  // Plain computation (no memo): trace lists are small and this keeps the
+  // compiler happy next to the memoized `selected` above.
+  const traceAll = selected?.trace ?? [];
+  const traceSetup = traceAll.filter(isSetupEvent);
+  const traceVisible = traceAll.filter((e) => !isSetupEvent(e));
+  const traceSplit = { all: traceAll, setup: traceSetup, visible: traceVisible, ...summarizeTrace(traceVisible) };
 
   const traceScrollRef = useRef<HTMLDivElement>(null);
   const traceEndRef = useRef<HTMLDivElement>(null);
@@ -469,11 +670,15 @@ export default function DashboardPage() {
                     <h2 className="text-xs font-medium tracking-wide text-stone-400">Timeline</h2>
                     <div className="flex items-center gap-2">
                       {selected.status === "running" && <span className="h-2 w-2 animate-pulse rounded-full bg-amber-500" />}
-                      <span className="tnum rounded-full border border-stone-200 bg-stone-100 px-2 py-0.5 text-xs font-medium text-stone-600">{selected.trace?.length ?? 0} steps</span>
+                      <span className="tnum rounded-full border border-stone-200 bg-stone-100 px-2 py-0.5 text-xs font-medium text-stone-600">
+                        {traceSplit.visible.length} steps
+                        {traceSplit.failed > 0 && <span className="text-red-600"> • {traceSplit.failed} failed</span>}
+                        {selected.updatedAt > selected.createdAt && <span className="text-stone-400"> • {formatDuration(selected.updatedAt - selected.createdAt)}</span>}
+                      </span>
                     </div>
                   </div>
 
-                  {!selected.trace || selected.trace.length === 0 ? (
+                  {traceSplit.all.length === 0 ? (
                     <div className="mt-3 rounded-xl border border-dashed border-stone-200 bg-stone-50/60 p-8 text-center">
                       {selected.status === "running" || selected.status === "creating" ? (
                         <div className="space-y-3">
@@ -486,14 +691,18 @@ export default function DashboardPage() {
                         <p className="text-sm text-stone-600">No trace recorded — the harness exited before logging.</p>
                       )}
                     </div>
+                  ) : traceSplit.visible.length === 0 ? (
+                    <div className="mt-3 rounded-xl border border-dashed border-stone-200 bg-stone-50/60 p-8 text-center">
+                      <p className="text-sm text-stone-600">Only setup events so far — browser steps will stream here.</p>
+                    </div>
                   ) : (
                     <div className="mt-3 rounded-xl border border-stone-200 bg-white">
                       <div ref={traceScrollRef} className="max-h-[440px] overflow-auto overscroll-contain p-3 sm:p-4" style={{ scrollbarGutter: "stable" as const }}>
                         <div className="relative pl-4">
                           <div className="absolute left-[18px] top-2 bottom-2 w-px bg-stone-200" />
                           <div className="space-y-3">
-                            {selected.trace.map((e: TraceEvent, i: number) => {
-                              const isLast = i === selected.trace!.length - 1;
+                            {traceSplit.visible.map((e: TraceEvent, i: number) => {
+                              const isLast = i === traceSplit.visible.length - 1;
                               const isActive = isLast && selected.status === "running";
                               const u = e.type.toUpperCase();
                               const label = u.includes("THOUGHT") ? "Thought" : u.includes("KNOWLEDGE") ? "Context" : u.includes("ACTION") ? "Action" : e.type;
@@ -518,10 +727,25 @@ export default function DashboardPage() {
                         </div>
                       </div>
                       <div className="flex items-center justify-between border-t border-stone-200 px-3 py-1.5 text-xs text-stone-400">
-                        <span className="tnum">{selected.trace.length} events</span>
+                        <span className="tnum">{traceSplit.visible.length} steps{traceSplit.failed > 0 && ` • ${traceSplit.failed} failed`}</span>
                         <span className="hidden sm:inline">auto-scrolls on new events</span>
                       </div>
                     </div>
+                  )}
+                  {traceSplit.setup.length > 0 && (
+                    <details className="group mt-2">
+                      <summary className="cursor-pointer list-none text-xs text-stone-400 transition hover:text-stone-600">
+                        <span className="group-open:hidden">Show setup ({traceSplit.setup.length} events)</span>
+                        <span className="hidden group-open:inline">Hide setup</span>
+                      </summary>
+                      <div className="mt-1.5 space-y-1 rounded-lg border border-stone-200 bg-stone-50 p-2.5">
+                        {traceSplit.setup.map((e, i) => (
+                          <div key={i} className="font-mono text-[11px] leading-4 text-stone-500">
+                            <span className="text-stone-400">{e.ts}</span> {cleanTraceText(e.text).slice(0, 200)}
+                          </div>
+                        ))}
+                      </div>
+                    </details>
                   )}
                 </div>
 
@@ -529,54 +753,7 @@ export default function DashboardPage() {
                 <div className="mt-8">
                   <h2 className="text-xs font-medium tracking-wide text-stone-400">Result</h2>
                   <div className="mt-3">
-                    {!selected.response ? (
-                      selected.status === "running" || selected.status === "creating" ? (
-                        <div className="space-y-2 rounded-xl border border-stone-200 bg-white p-4">
-                          <div className="h-3 w-1/3 animate-pulse rounded-full bg-stone-200" />
-                          <div className="h-3 w-2/3 animate-pulse rounded-full bg-stone-200/80" />
-                          <div className="h-3 w-1/2 animate-pulse rounded-full bg-stone-200/60" />
-                        </div>
-                      ) : (
-                        <div className="rounded-xl border border-stone-200 bg-stone-50 p-4 text-sm text-stone-600">No result yet.</div>
-                      )
-                    ) : (
-                      (() => {
-                        let parsed: Record<string, unknown> | null = null;
-                        try { parsed = JSON.parse(selected.response!); } catch { parsed = null; }
-                        const isSent = parsed?.sent === true || (typeof parsed?.conclusion === "string" && String(parsed.conclusion).includes("Email sent"));
-                        if (parsed?.status === "completed" && typeof parsed.conclusion === "string" && !isSent) {
-                          return (
-                            <div className="rounded-xl border bg-emerald-50 border-emerald-200 p-4">
-                              <div className="flex items-center gap-2 text-emerald-800"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-600 text-white text-xs">✓</span><span className="text-xs font-bold tracking-widest">COMPLETED</span>{selected.replayUrl && <a href={selected.replayUrl} target="_blank" className="ml-auto text-xs font-semibold text-emerald-700 underline">Watch replay →</a>}</div>
-                              <div className="mt-2 text-sm leading-6 text-stone-800 whitespace-pre-wrap">{String(parsed.conclusion).slice(0, 1200)}</div>
-                            </div>
-                          );
-                        }
-                        if (parsed?.email && typeof parsed.email === "string") {
-                          return (
-                            <div className="rounded-xl border bg-emerald-50 border-emerald-200 p-4">
-                              <div className="flex items-center gap-2 text-emerald-800"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-600 text-white text-xs">✓</span><span className="text-xs font-bold tracking-widest">EMAIL FOUND</span></div>
-                              <div className="mt-2 font-mono text-sm font-semibold text-emerald-900 break-all">{String(parsed.email)}</div>
-                              {typeof parsed.source === "string" && <div className="mt-1 text-xs text-emerald-700">via {String(parsed.source)}</div>}
-                            </div>
-                          );
-                        }
-                        if (isSent) {
-                          return (
-                            <div className="rounded-xl border bg-emerald-50 border-emerald-200 p-4">
-                              <div className="flex items-center gap-2"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-600 text-white text-xs">✓</span><span className="text-sm font-semibold text-emerald-900">Email sent</span>{selected.replayUrl && <a href={selected.replayUrl} target="_blank" className="ml-auto text-xs font-semibold text-emerald-700 underline">Watch replay →</a>}</div>
-                              <div className="mt-2 text-sm leading-5 text-stone-800">{String(parsed?.conclusion ?? "").slice(0, 400)}</div>
-                              {typeof parsed?.to === "string" && parsed.to ? <div className="mt-1 text-xs font-mono text-stone-600">to {String(parsed.to)} • {typeof parsed.subject === "string" ? String(parsed.subject) : ""}</div> : null}
-                            </div>
-                          );
-                        }
-                        if (parsed && typeof parsed === "object" && (parsed.conclusion || parsed.response || parsed.title)) {
-                          const text = [parsed.conclusion && String(parsed.conclusion), parsed.title && `Title: ${String(parsed.title)}`, parsed.h1 && `H1: ${String(parsed.h1)}`, parsed.url && `URL: ${String(parsed.url)}`, parsed.response && String(parsed.response).slice(0, 1500)].filter(Boolean).join("\n\n");
-                          return <div className="rounded-xl border bg-stone-900 p-4 font-mono text-xs leading-5 text-stone-100 whitespace-pre-wrap break-words">{text.slice(0, 3000)}</div>;
-                        }
-                        return <div className="rounded-xl border bg-stone-900 p-4 font-mono text-xs leading-5 text-stone-100 whitespace-pre-wrap break-words max-h-[280px] overflow-auto">{selected.response!.slice(0, 4000)}</div>;
-                      })()
-                    )}
+                    <ResultCard response={selected.response} status={selected.status} replayUrl={selected.replayUrl} />
                   </div>
                   {selected.replayUrl && !selected.response?.includes("Email sent") && (
                     <div className="mt-3 flex items-center gap-2 rounded-xl border border-stone-200 bg-stone-50 p-3">
