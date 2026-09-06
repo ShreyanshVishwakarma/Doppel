@@ -68,7 +68,20 @@ export default function OnboardingPage() {
   /* eslint-enable react-hooks/set-state-in-effect */
 
   const canContinueStep1 = role !== null;
-  const canContinueStep2 = bio.trim().length > 40;
+  const canContinueStep2 = bio.trim().length >= 40;
+  const bioValid = bio.trim().length >= 40;
+
+  // Convex server errors arrive wrapped in request metadata — strip it so users
+  // see the actual reason instead of "[CONVEX M(...)] [Request ID: ...] ...".
+  function cleanError(e: unknown) {
+    const raw = e instanceof Error ? e.message : "Failed to save — check Convex logs";
+    const cleaned = raw
+      .replace(/^\[CONVEX[^\]]*\]\s*/, "")
+      .replace(/\s*\[Request ID:[^\]]*\]/, "")
+      .split(" at handler")[0]
+      .trim();
+    return cleaned || "Failed to save — check Convex logs";
+  }
 
   function next() {
     if (step === 1 && canContinueStep1) setStep(2);
@@ -128,7 +141,7 @@ ${role === "professional" ? `- Email volume: ${prefs.emailVolume}` : ""}
       return;
     }
     if (bio.trim().length < 40) {
-      setError("Bio paragraph must be at least 40 characters");
+      setError(`Bio paragraph needs at least 40 characters — you have ${bio.trim().length}. Tell us a bit more about yourself.`);
       return;
     }
     if (!isAuthenticated) {
@@ -177,7 +190,7 @@ ${role === "professional" ? `- Email volume: ${prefs.emailVolume}` : ""}
 
       setSubmitted(true);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to save — check Convex logs");
+      setError(cleanError(e));
     } finally {
       setIsSubmitting(false);
     }
@@ -353,10 +366,10 @@ ${role === "professional" ? `- Email volume: ${prefs.emailVolume}` : ""}
                       className="mt-2 w-full resize-none rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-sm leading-6 placeholder:text-zinc-400 focus:border-zinc-400 focus:bg-white focus:outline-none"
                     />
                     <div className="mt-2 flex items-center justify-between text-xs">
-                      <span className={bio.trim().length < 40 ? "text-amber-600" : "text-zinc-500"}>
-                        {bio.trim().length < 40 ? `Add a bit more — ${bio.trim().length}/40 chars min` : `${bio.trim().length} chars • Ready`}
+                      <span className={bioValid ? "text-stone-500" : "text-amber-600"}>
+                        {bioValid ? `${bio.trim().length} chars • Ready` : bio.trim().length === 0 ? "Write a few sentences about yourself" : `Keep going — ${bio.trim().length}/40 chars min`}
                       </span>
-                      <span className="font-mono text-zinc-400">markdown • LPD</span>
+                      <span className="font-mono text-stone-400">markdown • LPD</span>
                     </div>
                   </div>
 
