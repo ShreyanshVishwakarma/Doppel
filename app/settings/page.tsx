@@ -262,7 +262,7 @@ export default function SettingsPage() {
             {loginInfo && !loginInfo.saved && (
               <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs font-medium leading-5 text-amber-900">
                 Waiting for you to finish logging in to {loginInfo.platform}…{" "}
-                <a href={loginInfo.url} target="_blank" rel="noopener" className="font-bold underline">Open the login page</a> if it didn't open automatically.
+                <a href={loginInfo.url} target="_blank" rel="noopener" className="font-bold underline">Open the login page</a> if it didn't open automatically. The link is single-use and expires in 30 minutes; click Log in again for a fresh one.
               </div>
             )}
 
