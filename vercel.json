@@ -2,10 +2,6 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "crons": [
     {
-      // NOTE: Hobby allows daily crons only — anything more frequent fails the
-      // Vercel deployment. Live sync is handled by dashboard polling
-      // (POST /api/sessions/sync every 8s); this is just the closed-tab
-      // backstop. On Pro, tighten to "*/5 * * * *".
       "path": "/api/cron/reconcile",
       "schedule": "0 3 * * *"
     }
