@@ -6,6 +6,8 @@ const isPublicRoute = createRouteMatcher([
   "/sign-in(.*)",
   "/sign-up(.*)",
   "/api/waitlist(.*)",
+  // cron has no Clerk session — the handler authenticates via CRON_SECRET itself
+  "/api/cron(.*)",
   // metadata assets — crawlers fetch these without a session
   "/opengraph-image(.*)",
   "/icon.svg",
