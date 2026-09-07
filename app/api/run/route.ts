@@ -1,5 +1,4 @@
 import { auth } from "@clerk/nextjs/server";
-import { after } from "next/server";
 import { ConvexHttpClient } from "convex/browser";
 import { z } from "zod";
 import { api } from "../../../convex/_generated/api";
@@ -367,32 +366,15 @@ export async function POST(req: Request) {
     });
   } catch {}
 
-  // Background harness execution. NOTE: this MUST use after(), not a bare
-  // fire-and-forget promise — Vercel freezes the function after the response
-  // is returned, so `void (async()=>{})` never runs past `return` below
-  // (sandbox VM gets created, session row stays at 1 log line, 0 steps forever).
-  // after() keeps the function alive up to maxDuration. The Clerk token is
-  // captured up front because getToken() needs the request context, which is
-  // gone once after() runs.
-  const convexToken = token;
-  const bgConvex = () => {
-    const c = getConvex();
-    c.setAuth(convexToken);
-    return c;
-  };
-  after(async () => {
-    let traceInterval: ReturnType<typeof setInterval> | undefined;
-    try {
-      // Immediate heartbeat so the dashboard leaves "Booting" within seconds.
-      try {
-        await bgConvex().mutation(api.sandboxSessions.update, {
-          id: sessionId as never,
-          logs: ["Harness worker started — connecting to sandbox"],
-        } as never);
-      } catch {}
-      await sandbox.connect().catch(() => {});
-      // Write task files — avoid shell interpolation for secrets
-      await sandbox.files.write("/tmp/prompt.md", markdownFull);
+  // Detached launch: run.sh executes INSIDE the sandbox VM, fully decoupled
+  // from this request. Serverless functions die past maxDuration (and freeze
+  // after responding), so nothing here blocks on completion — progress is
+  // reconciled into Convex by POST /api/sessions/sync (polled by the
+  // dashboard) and /api/cron/reconcile, which also destroy the VM when done.
+  try {
+    await sandbox.connect().catch(() => {});
+    // Write task files — avoid shell interpolation for secrets
+    await sandbox.files.write("/tmp/prompt.md", markdownFull);
       await sandbox.files.write("/tmp/task.txt", prompt);
       await sandbox.files.write("/tmp/profiles.json", JSON.stringify({ needed: profileMap, allActive: allActiveProfiles, platforms, warnings: profileWarnings }));
       await sandbox.files.write("/tmp/env.json", JSON.stringify({ SOLARI_API_KEY: apiKey, AI_GATEWAY_API_KEY: aiGatewayKey }));
@@ -587,183 +569,28 @@ trace "THOUGHT" "Harness done"
 
       await sandbox.files.write("/tmp/run.sh", runSh.replace(/\r\n/g, "\n"));
 
-      const startLiveTrace = () => {
-        let llmSeen = 0;
-        let lastTraceHash = "";
-        let browserIdPushed = false;
-        let replayUrlPushed = false;
-        // Parse opencode's raw transcript for browser tool calls so the dashboard
-        // shows what the LLM is doing in real time, not just harness-level events.
-        const parseLlmEvents = (raw: string) => {
-          const clean = raw.replace(/\x1b\[[0-9;]*m/g, "").replace(/\r/g, "");
-          const lines = clean.split("\n").filter((l) => l.trim());
-          if (llmSeen > lines.length) llmSeen = 0;
-          const events: { ts: string; type: string; text: string }[] = [];
-          const ts = new Date().toTimeString().slice(0, 8);
-          for (const l of lines.slice(llmSeen)) {
-            llmSeen++;
-            const failed = /✗/.test(l);
-            if (failed || /⚙/.test(l) || /solari_\w+/.test(l)) {
-              const text = (failed ? "FAILED — " : "") + l.replace(/^[^\w[]/, "").replace(/[⚙✗]/g, "").trim();
-              if (text.length > 4) events.push({ ts, type: "ACTION", text: text.slice(0, 240) });
-            }
-          }
-          return events.slice(-40);
-        };
-        traceInterval = setInterval(async () => {
-          try {
-            const raw = await sandbox.files.readText("/tmp/trace.jsonl");
-            const lines = raw.split("\n").filter(Boolean).slice(-80);
-            const trace = lines
-              .map((l) => {
-                try {
-                  return JSON.parse(l);
-                } catch {
-                  return null;
-                }
-              })
-              .filter(Boolean) as { ts: string; type: string; text: string }[];
-            try {
-              const rawOut = await sandbox.files.readText("/tmp/opencode.raw");
-              trace.push(...parseLlmEvents(rawOut));
-            } catch {}
-            // Only write when content actually changed; skip cycles where the
-            // trace is idle (unchanged payload = pure billed egress, no value).
-            const hash = `${trace.length}:${trace.length ? JSON.stringify(trace[trace.length - 1]) : ""}`;
-            if (trace.length && hash !== lastTraceHash) {
-              lastTraceHash = hash;
-              try {
-                await bgConvex().mutation(api.sandboxSessions.update, { id: sessionId as never, trace } as never);
-              } catch {}
-            }
-            // push browserId/replayUrl exactly once each
-            if (!browserIdPushed) {
-              try {
-                const bid = (await sandbox.files.readText("/tmp/browser_id.txt")).trim();
-                if (bid) {
-                  browserIdPushed = true;
-                  try {
-                    await bgConvex().mutation(api.sandboxSessions.update, { id: sessionId as never, browserSessionId: bid } as never);
-                  } catch {}
-                }
-              } catch {}
-            }
-            if (!replayUrlPushed) {
-              try {
-                const rurl = (await sandbox.files.readText("/tmp/replay_url.txt")).trim();
-                if (rurl) {
-                  replayUrlPushed = true;
-                  try {
-                    await bgConvex().mutation(api.sandboxSessions.update, { id: sessionId as never, replayUrl: rurl } as never);
-                  } catch {}
-                }
-              } catch {}
-            }
-          } catch {}
-        }, 5000);
-      };
-      startLiveTrace();
-      // no client-side timeout — the harness runs until it finishes
-      const result = await sandbox.commands.run("sh", { args: ["-c", "chmod +x /tmp/run.sh && /tmp/run.sh"] });
-      if (traceInterval) clearInterval(traceInterval);
-      const logs = [result.stdout?.slice(0, 6000) ?? "", result.stderr?.slice(0, 3000) ?? ""].filter(Boolean);
-      let response: string | undefined;
-      let trace: { ts: string; type: string; text: string }[] | undefined;
-      let browserSessionId: string | undefined;
-      let replayUrl: string | undefined;
-      try {
-        response = (await sandbox.files.readText("/tmp/result.json")).slice(0, 8000);
-      } catch {}
-      if (!response) {
-        try {
-          response = (await sandbox.files.readText("/tmp/opencode.out")).slice(0, 8000);
-        } catch {}
-      }
-      try {
-        const raw = await sandbox.files.readText("/tmp/trace.jsonl");
-        trace = raw
-          .split("\n")
-          .filter(Boolean)
-          .map((l) => {
-            try {
-              return JSON.parse(l);
-            } catch {
-              return null;
-            }
-          })
-          .filter(Boolean) as typeof trace;
-      } catch {}
-      try {
-        const rawOut = await sandbox.files.readText("/tmp/opencode.raw");
-        const clean = rawOut.replace(/\x1b\[[0-9;]*m/g, "").replace(/\r/g, "");
-        const llmEvents = clean
-          .split("\n")
-          .filter((l) => /✗/.test(l) || /⚙/.test(l) || /solari_\w+/.test(l))
-          .slice(-40)
-          .map((l) => {
-            const failed = /✗/.test(l);
-            return { ts: "", type: "ACTION", text: ((failed ? "FAILED — " : "") + l.replace(/^[^\w[]/, "").replace(/[⚙✗]/g, "").trim()).slice(0, 240) };
-          })
-          .filter((e) => e.text.length > 4);
-        if (llmEvents.length) trace = [...(trace ?? []), ...llmEvents];
-      } catch {}
-      try {
-        browserSessionId = (await sandbox.files.readText("/tmp/browser_id.txt")).trim() || undefined;
-      } catch {}
-      try {
-        replayUrl = (await sandbox.files.readText("/tmp/replay_url.txt")).trim() || undefined;
-      } catch {}
-      // also try parsing response for browserId/replay
-      try {
-        const j = JSON.parse(response ?? "{}");
-        if (j.browserId && !browserSessionId) browserSessionId = j.browserId;
-        if (j.replayUrl && !replayUrl) replayUrl = j.replayUrl;
-      } catch {}
-      const needsInput = (() => {
-        try {
-          const j = JSON.parse(response ?? "{}");
-          if (j.needsAuth) return `Login required for ${j.needsAuth} — connect profile in Settings`;
-          if (j.needsInput) return j.needsInput;
-        } catch {}
-        return null;
-      })();
-      const finalStatus = needsInput ? ("paused" as const) : result.exitCode === 0 ? "completed" : logs.join("").includes("failed") ? "failed" : "completed";
-      // Merge browserId/replay into response if not already there
-      let finalResponse = response;
-      if (replayUrl || browserSessionId) {
-        try {
-          const j = response ? JSON.parse(response) : {};
-          if (replayUrl) j.replayUrl = replayUrl;
-          if (browserSessionId) j.browserSessionId = browserSessionId;
-          finalResponse = JSON.stringify(j).slice(0, 8000);
-        } catch {}
-      }
-      try {
-        await bgConvex().mutation(api.sandboxSessions.update, {
-          id: sessionId as never,
-          status: finalStatus,
-          logs: logs.length ? logs : ["Harness completed"],
-          response: finalResponse,
-          trace,
-          browserSessionId,
-          replayUrl,
-          errorMessage: needsInput ? needsInput : undefined,
-        } as never);
-      } catch {}
+      // Launch detached: nohup + & detaches run.sh from this RPC, which
+      // returns in seconds. The VM keeps running opencode long after we return.
+      const launch = await sandbox.commands.run("sh", { args: ["-c", "chmod +x /tmp/run.sh && nohup /tmp/run.sh >/tmp/run.log 2>&1 & echo launched"] });
+      const launchOut = `${launch.stdout ?? ""} ${launch.stderr ?? ""}`.trim().slice(0, 500);
+      await convex.mutation(api.sandboxSessions.update, {
+        id: sessionId as never,
+        logs: [`Harness launched detached (exit ${launch.exitCode}) ${launchOut}`.slice(0, 800)],
+        trace: [{ ts: new Date().toTimeString().slice(0, 8), type: "THOUGHT", text: "Harness launched — reading profile and prompt" }],
+      } as never);
+      try { sandbox.close(); } catch {}
+
+      return Response.json({ sessionId, sandboxId: sandbox.id, snapshotId, status: "running", profilesUsed: profileMap, profileWarnings: profileWarnings.length ? profileWarnings : undefined });
+    } catch (e) {
+      await convex.mutation(api.sandboxSessions.update, {
+        id: sessionId as never,
+        status: "failed",
+        logs: [`Launch failed: ${(e as Error).message.slice(0, 1500)}`],
+        errorMessage: (e as Error).message.slice(0, 800),
+      } as never).catch(() => {});
       await sandbox.kill().catch(() => {});
-    } catch (err) {
-      if (traceInterval) clearInterval(traceInterval);
-      try {
-        await bgConvex().mutation(api.sandboxSessions.update, {
-          id: sessionId as never,
-          status: "failed",
-          logs: [(err as Error).message.slice(0, 2000)],
-          errorMessage: (err as Error).message.slice(0, 800),
-        } as never);
-      } catch {}
-      await sandbox.kill().catch(() => {});
+      return Response.json({ error: `Failed to launch harness: ${(e as Error).message.slice(0, 300)}` }, { status: 502 });
     }
-  });
 
   return Response.json({ sessionId, sandboxId: sandbox.id, snapshotId, status: "running", profilesUsed: profileMap, profileWarnings: profileWarnings.length ? profileWarnings : undefined });
 }

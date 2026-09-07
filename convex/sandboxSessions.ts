@@ -67,31 +67,63 @@ export const update = mutation({
   },
 });
 
-// Internal helper for server routes that already validated via Clerk auth header
+// Internal helper for server routes / cron that authenticate via
+// SANDBOX_HARNESS_SECRET instead of a user JWT (the reconcile loop has no user).
 export const updateBySandboxId = mutation({
   args: {
     sandboxId: v.string(),
     secret: v.string(),
     status: v.optional(v.union(v.literal("creating"), v.literal("running"), v.literal("paused"), v.literal("completed"), v.literal("failed"))),
     logs: v.optional(v.array(v.string())),
+    response: v.optional(v.string()),
+    trace: v.optional(v.array(v.object({ ts: v.string(), type: v.string(), text: v.string() }))),
     errorMessage: v.optional(v.string()),
+    browserSessionId: v.optional(v.string()),
     replayUrl: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const expected = process.env.SANDBOX_HARNESS_SECRET;
     if (!expected || args.secret !== expected) throw new Error("Unauthorized harness");
-    const sess = await ctx.db
+    let sess = await ctx.db
       .query("sandboxSessions")
       .withIndex("by_status", (q) => q.eq("status", "running"))
+      .collect()
+      .then((all) => all.find((s) => s.sandboxId === args.sandboxId));
+    sess ??= await ctx.db
+      .query("sandboxSessions")
+      .withIndex("by_status", (q) => q.eq("status", "creating"))
       .collect()
       .then((all) => all.find((s) => s.sandboxId === args.sandboxId));
     if (!sess) return;
     const patch: Record<string, unknown> = { updatedAt: Date.now() };
     if (args.status) patch.status = args.status;
     if (args.errorMessage !== undefined) patch.errorMessage = args.errorMessage;
+    if (args.browserSessionId) patch.browserSessionId = args.browserSessionId;
     if (args.replayUrl) patch.replayUrl = args.replayUrl;
+    if (args.response !== undefined) patch.response = args.response;
+    if (args.trace !== undefined) patch.trace = args.trace;
     if (args.logs) patch.executionLogs = [...(sess.executionLogs ?? []), ...args.logs].slice(-200);
     await ctx.db.patch(sess._id, patch);
+  },
+});
+
+// Service listing for the cron reconcile loop (secret-authed, no user JWT).
+// Returns live sessions the loop must sync, plus terminal sessions whose
+// sandbox may still be burning money (reconcile kills those too).
+export const listForReconcile = query({
+  args: { secret: v.string() },
+  handler: async (ctx, args) => {
+    const expected = process.env.SANDBOX_HARNESS_SECRET;
+    if (!expected || args.secret !== expected) throw new Error("Unauthorized");
+    const out: Array<{ _id: string; sandboxId: string; status: string; updatedAt: number; createdAt: number }> = [];
+    for (const st of ["running", "creating"] as const) {
+      const rows = await ctx.db
+        .query("sandboxSessions")
+        .withIndex("by_status", (q) => q.eq("status", st))
+        .collect();
+      for (const s of rows) out.push({ _id: s._id, sandboxId: s.sandboxId, status: s.status, updatedAt: s.updatedAt ?? s.createdAt, createdAt: s.createdAt });
+    }
+    return out;
   },
 });
 

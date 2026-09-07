@@ -421,6 +421,21 @@ export default function DashboardPage() {
     }
   }, [selected?.trace]);
 
+  // Live sync: the harness runs detached in its VM, so pull its progress into
+  // Convex every 8s while the selected session is live. Short requests only —
+  // streaming trace plus guaranteed finalization even past maxDuration.
+  useEffect(() => {
+    if (!selected || (selected.status !== "running" && selected.status !== "creating")) return;
+    const id = selected._id;
+    let cancelled = false;
+    const syncOnce = () => {
+      fetch("/api/sessions/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: id }) }).catch(() => {});
+    };
+    syncOnce();
+    const t = setInterval(() => { if (!cancelled) syncOnce(); }, 8000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, [selected?._id, selected?.status]);
+
   async function handlePromptSubmit(e: React.FormEvent) {
     e.preventDefault();
     const text = input.trim();

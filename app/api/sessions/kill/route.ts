@@ -40,7 +40,10 @@ export async function POST(req: Request) {
   }
 
   const apiKey = process.env.SOLARI_API_KEY;
-  if (apiKey) {
+  if (!apiKey) {
+    return Response.json({ error: "SOLARI_API_KEY not configured on the server — kill the VM in the Solari console" }, { status: 503 });
+  }
+  {
     try {
       const { SandboxClient } = await import("@solarisdk/sandbox");
       const sandboxes = new SandboxClient({ apiKey, baseUrl: "https://api.getsolari.com" });
