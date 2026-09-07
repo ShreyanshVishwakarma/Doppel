@@ -103,6 +103,10 @@ export async function syncSandboxSession(args: {
   let sandbox: Awaited<ReturnType<SandboxClient["connect"]>>;
   try {
     sandbox = await client.connect(sandboxId);
+    // Re-attached handles start with a CLOSED control channel — file reads
+    // throw "Not connected" until it is opened (create() returns an already
+    // connected handle, which is why the launch path never hit this).
+    await sandbox.connect();
   } catch (e) {
     return { finalized: false, note: `connect failed: ${(e as Error).message.slice(0, 120)}` };
   }
