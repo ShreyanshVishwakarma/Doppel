@@ -2,7 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import { ConvexHttpClient } from "convex/browser";
 import { z } from "zod";
 import { api } from "../../../../convex/_generated/api";
-import { requireOwner, isResponse } from "../../../../lib/owner";
+import { requireAccess, isResponse } from "../../../../lib/owner";
 import { syncSandboxSession } from "../../../../lib/harness-sync";
 
 export const maxDuration = 60;
@@ -21,7 +21,7 @@ const syncSchema = z.object({ sessionId: z.string().min(1) });
 // session and destroy the VM. Short-lived by design; the dashboard polls it
 // while a session is running, so no request ever needs to outlive maxDuration.
 export async function POST(req: Request) {
-  const gate = await requireOwner();
+  const gate = await requireAccess();
   if (isResponse(gate)) return gate;
   const { userId, getToken } = await auth();
   if (!userId) return Response.json({ error: "Authentication required" }, { status: 401 });

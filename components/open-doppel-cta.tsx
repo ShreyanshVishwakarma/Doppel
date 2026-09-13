@@ -19,28 +19,31 @@ export function OpenDoppelCta({
 }) {
   const { isAuthenticated, isLoading } = useConvexAuth();
   const profile = useQuery(api.profiles.getMyProfile, isAuthenticated ? {} : "skip");
-  const [owner, setOwner] = useState<boolean | null>(null);
+  const [allowed, setAllowed] = useState<boolean | null>(null);
 
   useEffect(() => {
-    if (!isAuthenticated) { setOwner(null); return; }
+    if (!isAuthenticated) return;
     let cancelled = false;
-    fetch("/api/me").then((r) => r.json()).then((d) => { if (!cancelled) setOwner(!!d.owner); }).catch(() => { if (!cancelled) setOwner(false); });
+    fetch("/api/me").then((r) => r.json()).then((d) => { if (!cancelled) setAllowed(!!d.allowed); }).catch(() => { if (!cancelled) setAllowed(false); });
     return () => { cancelled = true; };
   }, [isAuthenticated]);
+
+  // Signed-out users never have access. Derived so signing out clears stale state.
+  const access = isAuthenticated ? allowed : null;
 
   const base =
     variant === "hero"
       ? "inline-flex h-11 items-center gap-2 rounded-full bg-stone-900 px-6 text-sm font-medium text-white shadow-sm transition hover:bg-black"
       : "inline-flex h-9 items-center justify-center rounded-full bg-stone-900 px-5 text-sm font-medium text-white transition hover:bg-zinc-800";
 
-  if (isLoading || (isAuthenticated && (profile === undefined || owner === null))) {
+  if (isLoading || (isAuthenticated && (profile === undefined || access === null))) {
     return <span className={`${base} pointer-events-none opacity-40`}>…</span>;
   }
 
-  if (isAuthenticated && owner === false) {
+  if (isAuthenticated && access === false) {
     return (
       <span className="inline-flex h-9 items-center rounded-full border border-stone-200 bg-stone-100 px-4 text-xs font-medium text-stone-600">
-        Private beta — join the waitlist below
+        Private beta. Join the waitlist below
       </span>
     );
   }

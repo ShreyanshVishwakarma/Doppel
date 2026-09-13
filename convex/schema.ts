@@ -54,10 +54,13 @@ export default defineSchema({
     .index("by_user_platform", ["userId", "platform"])
     .index("by_userId", ["userId"]),
 
-  // Waitlist — public email capture while the product is private
+  // Waitlist — public email capture while the product is private.
+  // `status` absent = pending; "approved" grants dashboard/API access.
   waitlist: defineTable({
     email: v.string(),
     createdAt: v.number(),
+    status: v.optional(v.union(v.literal("pending"), v.literal("approved"))),
+    approvedAt: v.optional(v.number()),
   }).index("by_email", ["email"]),
 
   // Sandbox harness sessions — one per prompt. Each is a Solari Sandbox
