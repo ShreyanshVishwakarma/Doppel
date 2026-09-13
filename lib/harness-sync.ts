@@ -31,23 +31,6 @@ function parseTraceJsonl(raw: string): TraceEvent[] {
     .filter((e): e is TraceEvent => !!e && typeof e.text === "string");
 }
 
-// opencode's raw transcript carries the live browser story (tool calls) that
-// trace.jsonl only gets at coarse granularity. Same extraction the dashboard
-// expects: last ~40 tool-call lines as ACTION events.
-export function extractLlmEvents(rawOut: string): TraceEvent[] {
-  const clean = rawOut.replace(/\x1b\[[0-9;]*m/g, "").replace(/\r/g, "");
-  return clean
-    .split("\n")
-    .filter((l) => /✗/.test(l) || /⚙/.test(l) || /solari_\w+/.test(l) || /browser_\w+/.test(l))
-    .slice(-40)
-    .map((l) => {
-      const failed = /✗/.test(l);
-      const text = ((failed ? "FAILED — " : "") + l.replace(/^[^\w[]/, "").replace(/[⚙✗]/g, "").trim()).slice(0, 240);
-      return { ts: "", type: "ACTION", text };
-    })
-    .filter((e) => e.text.length > 4);
-}
-
 export function decideFinal(resultJson: string): { status: "completed" | "paused" | "failed"; errorMessage?: string } {
   try {
     const j = JSON.parse(resultJson) as Record<string, unknown>;
@@ -111,22 +94,15 @@ export async function syncSandboxSession(args: {
     return { finalized: false, note: `connect failed: ${(e as Error).message.slice(0, 120)}` };
   }
 
-  const [traceRaw, rawOut, browserId, replayUrl, resultJson] = await Promise.all([
+  const [traceRaw, browserId, replayUrl, resultJson] = await Promise.all([
     tryRead(sandbox, "/tmp/trace.jsonl"),
-    tryRead(sandbox, "/tmp/opencode.raw"),
     tryRead(sandbox, "/tmp/browser_id.txt"),
     tryRead(sandbox, "/tmp/replay_url.txt"),
     tryRead(sandbox, "/tmp/result.json"),
   ]);
 
   let trace: TraceEvent[] | undefined;
-  if (traceRaw) {
-    trace = parseTraceJsonl(traceRaw);
-    if (rawOut) {
-      const llm = extractLlmEvents(rawOut);
-      if (llm.length) trace = [...trace, ...llm];
-    }
-  }
+  if (traceRaw) trace = parseTraceJsonl(traceRaw);
 
   // Finished? result.json is written exactly once, at the end of run.sh.
   if (resultJson) {

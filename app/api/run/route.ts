@@ -187,7 +187,7 @@ function detectPlatforms(prompt: string): string[] {
   const p = prompt.toLowerCase();
   const out: string[] = [];
   if (p.includes("gmail") || p.includes("mail.google") || p.includes("email") || p.includes("inbox") || p.includes("google mail")) out.push("gmail");
-  if (p.includes("linkedin") || p.includes("connect with") || p.includes("dm on linkedin") || p.includes("linkedin message")) out.push("linkedin");
+  if (/\blinkedin\b|\bdm\b|direct message|\bconnect(ion)?\b|recruiter|referral|outreach/.test(p)) out.push("linkedin");
   if (p.includes("twitter") || p.includes(" x.com") || p.includes("x/twitter") || p.includes("tweet")) out.push("twitter");
   if (p.includes("github.com") || p.includes("github profile")) out.push("github");
   if (p.includes("greenhouse") || p.includes("lever") || p.includes("ashby") || p.includes("apply") || p.includes("job application") || p.includes("application portal")) out.push("greenhouse");
@@ -301,10 +301,18 @@ export async function POST(req: Request) {
   }
 
   const { SandboxClient } = await import("@solarisdk/sandbox");
-  const sandboxes = new SandboxClient({ apiKey, baseUrl: "https://api.getsolari.com" });
+  // Bound every gateway call. The SDK transport retries 5xx/aborts up to 5 times
+  // behind its own 5-minute per-request timeout, so an unprovisionable snapshot
+  // can otherwise hang this function past maxDuration with nothing user-visible.
+  const sandboxes = new SandboxClient({
+    apiKey,
+    baseUrl: "https://api.getsolari.com",
+    fetch: (input, init) => fetch(input, { ...(init ?? {}), signal: AbortSignal.timeout(60_000) }),
+  });
 
   let sandbox!: Awaited<ReturnType<typeof sandboxes.create>>;
   {
+    const deadline = Date.now() + 150_000;
     let lastErr: unknown = null;
     for (let attempt = 0; attempt < 8; attempt++) {
       try {
@@ -315,8 +323,8 @@ export async function POST(req: Request) {
         lastErr = e;
         const msg = (e as Error).message + " " + String((e as { status?: number })?.status ?? "") + " " + String((e as { code?: string })?.code ?? "");
         const retryable = msg.includes("No sandbox host available") || msg.includes("503") || msg.includes("429") || msg.includes("ConcurrencyLimit") || msg.includes("NoCapacity") || (e as { status?: number })?.status === 503 || (e as { status?: number })?.status === 429;
-        if (!retryable || attempt === 7) break;
-        const delay = 3000 * (attempt + 1);
+        const delay = Math.min(3000 * (attempt + 1), 10000);
+        if (!retryable || attempt === 7 || Date.now() + delay > deadline) break;
         await new Promise((r) => setTimeout(r, delay));
       }
     }
@@ -324,7 +332,9 @@ export async function POST(req: Request) {
       const msg = (lastErr as Error).message;
       const isCapacity = msg.includes("No sandbox host available") || msg.includes("ConcurrencyLimit") || msg.includes("NoCapacity");
       const status = isCapacity ? 503 : 502;
-      const hint = isCapacity ? " Solari hosts at capacity — retry in 10-20s (transient, not config)." : "";
+      const hint = isCapacity
+        ? ` Solari could not place a sandbox for snapshot ${snapshotId}. If this keeps happening the snapshot is stale: rebuild it with scripts/build-harness-snapshot.mjs and update SANDBOX_SNAPSHOT_ID.`
+        : "";
       return Response.json({ error: `Failed to create sandbox from snapshot: ${msg}${hint}` }, { status });
     }
   }
@@ -384,7 +394,7 @@ export async function POST(req: Request) {
       const runSh = String.raw`#!/bin/sh
 set -e
 export HOME=/root
-export PATH=/root/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH
+export PATH=/root/.opencode/bin:/root/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH
 # Load env from file (no shell interpolation leakage)
 SOLARI_API_KEY=$(node -e "console.log(JSON.parse(require('fs').readFileSync('/tmp/env.json','utf8')).SOLARI_API_KEY)" 2>/dev/null)
 AI_GATEWAY_API_KEY=$(node -e "console.log(JSON.parse(require('fs').readFileSync('/tmp/env.json','utf8')).AI_GATEWAY_API_KEY)" 2>/dev/null)
@@ -511,6 +521,18 @@ echo "raw size $(wc -c < /tmp/opencode.raw 2>&1) lines $(wc -l < /tmp/opencode.r
 cat /tmp/opencode.raw 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | sed 's/\r//g' | head -n 800 > /tmp/opencode.out
 OPENCODE_EXIT=$?
 trace "THOUGHT" "opencode exit $OPENCODE_EXIT raw $(wc -c < /tmp/opencode.raw 2>&1) out $(wc -c < /tmp/opencode.out 2>&1)"
+# Fold opencode's tool calls into the trace so browser actions stream into the
+# dashboard even if a later file read misses opencode.raw.
+node -e "
+const fs=require('fs');
+try{
+  const raw=fs.readFileSync('/tmp/opencode.raw','utf8').replace(/\x1b\[[0-9;]*m/g,'').replace(/\r/g,'');
+  const lines=raw.split('\n').map(l=>l.trim()).filter(l=>/^[✗⚙]/.test(l)||/solari_\w+/.test(l)).slice(-40);
+  const ts=new Date().toTimeString().slice(0,8);
+  const ev=lines.map(l=>({ts,type:'ACTION',text:(/^✗/.test(l)?'FAILED — ':'')+l.replace(/[⚙✗]/g,'').trim().slice(0,240)})).filter(e=>e.text.length>4);
+  if(ev.length) fs.appendFileSync('/tmp/trace.jsonl', ev.map(e=>JSON.stringify(e)).join('\n')+'\n');
+}catch(e){}
+" 2>/dev/null || true
 cat /tmp/opencode.out 2>&1 | head -n 200
 # re-ensure browser SDK for opencode MCP (already baked to /opt/doppel)
 if [ ! -f /tmp/node_modules/@solarisdk/browser/dist/index.js ] && [ -f /opt/doppel/node_modules/@solarisdk/browser/dist/index.js ]; then

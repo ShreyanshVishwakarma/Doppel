@@ -39,6 +39,24 @@ set -e
 export HOME=/root
 export PATH=$HOME/.local/bin:$PATH
 
+# patchright-core (via @solarisdk/browser) hard-requires Node >= 20, and the base
+# template ships Node 18 — install Node 20 and make it the default node on PATH
+# (run.sh puts /usr/local/bin ahead of /usr/bin, so the browser MCP picks it up).
+echo "==> [0/5] Installing Node 20 (patchright-core requires node >= 20)..."
+if ! node -v | grep -q '^v2[0-9]'; then
+  mkdir -p /usr/local/bin
+  NV=$(curl -fsSL https://nodejs.org/dist/latest-v20.x/ | grep -o 'node-v20\.[0-9.]*-linux-x64\.tar\.gz' | head -1)
+  echo "downloading $NV"
+  curl -fsSL "https://nodejs.org/dist/latest-v20.x/$NV" -o /tmp/node20.tar.gz
+  rm -rf /opt/node20 && mkdir -p /opt/node20
+  tar -xzf /tmp/node20.tar.gz -C /opt/node20 --strip-components=1
+  ln -sf /opt/node20/bin/node /usr/local/bin/node
+  ln -sf /opt/node20/bin/npm /usr/local/bin/npm
+  ln -sf /opt/node20/bin/npx /usr/local/bin/npx
+fi
+export PATH=/usr/local/bin:$PATH
+echo "node now: $(node -v) npm $(npm -v)"
+
 echo "==> [1/4] System check (no heavy apt - using template base)..."
 echo "node $(node -v) npm $(npm -v)"
 which curl 2>&1 | head -2; which python3 2>&1 | head -2
@@ -56,6 +74,18 @@ if ! which opencode >/dev/null 2>&1; then
 fi
 which opencode 2>&1 | head -20
 opencode --version 2>&1 | head -20
+
+# opencode's installer drops the binary in /root/.opencode/bin and only adds it to
+# PATH via ~/.bashrc, which non-login shells never source. Symlink it onto the real
+# PATH (run.sh also prepends /root/.opencode/bin as a belt-and-braces measure).
+if [ ! -x /usr/local/bin/opencode ]; then
+  OC=""
+  [ -x /root/.opencode/bin/opencode ] && OC=/root/.opencode/bin/opencode
+  [ -z "$OC" ] && [ -x "$HOME/.local/bin/opencode" ] && OC="$HOME/.local/bin/opencode"
+  [ -z "$OC" ] && [ -x /opt/node20/bin/opencode ] && OC=/opt/node20/bin/opencode
+  [ -n "$OC" ] && ln -sf "$OC" /usr/local/bin/opencode
+fi
+echo "resolved opencode: $(which opencode 2>&1) $(opencode --version 2>&1 | head -1)"
 
 echo "==> [3/4] Configuring OpenCode Solari MCP Integration..."
 mkdir -p "$HOME/.config/opencode"
