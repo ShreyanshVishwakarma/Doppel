@@ -137,6 +137,16 @@ export default function SettingsPage() {
   }
 
   async function handleLogin(platform: string) {
+    // Open the tab now, inside the click gesture. Calling window.open after the
+    // await below loses the user gesture and popup blockers silently drop it.
+    let tab: Window | null = null;
+    try {
+      tab = window.open("", "_blank");
+      if (tab) tab.opener = null;
+    } catch {
+      tab = null;
+    }
+
     setLoggingIn(platform);
     setProfilesMsg(null);
     setLoginInfo(null);
@@ -146,9 +156,11 @@ export default function SettingsPage() {
       if (!res.ok) throw new Error(data.error ?? "Failed");
       const info = { platform, url: data.url, sinceVersion: data.sinceVersion, saved: false };
       setLoginInfo(info);
-      window.open(data.url, "_blank", "noopener");
+      if (tab) tab.location.href = data.url;
+      else window.open(data.url, "_blank", "noopener");
       setProfilesMsg(`Login page opened for ${platform} — sign in there, then click Save. This page detects when you're done.`);
     } catch (e) {
+      tab?.close();
       setProfilesMsg(e instanceof Error ? e.message : "Login failed");
     } finally {
       setLoggingIn(null);
@@ -232,7 +244,7 @@ export default function SettingsPage() {
                         {mapped && (() => {
                           const sp = (solariList ?? []).find((s) => s.id === mapped.solariProfileId);
                           if (sp?.editorStatus === "error") {
-                            return <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs font-medium text-amber-900">Last save failed: {sp.editorError ?? "editor died"} — click Log in again and Save.</div>;
+                            return <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs font-medium text-amber-900">Last save failed: {sp.editorError ?? "editor died"} — click Log in, then Open editor in the login page to retry.</div>;
                           }
                           return null;
                         })()}
