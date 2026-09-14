@@ -12,13 +12,39 @@ export const maxDuration = 300;
 // despite 62 cookies "attached"). This server applies cookies client-side via
 // patchright after session create, so profileId actually logs the user in.
 const solariBrowserMcpMjs = String.raw`#!/usr/bin/env node
-import { Solari } from "@solarisdk/browser";
-import { chromium } from "patchright-core";
+import { pathToFileURL } from "node:url";
 import readline from "node:readline";
 import fs from "node:fs";
 
+// Resolve SDK + browser driver from absolute baked paths (/opt/doppel first,
+// then the /tmp copy run.sh maintains). The package is pure ESM
+// ("type": "module"), so dynamic import() from a file:// URL is required —
+// createRequire() cannot load it.
+async function tryImport(pkg, sub) {
+  for (const base of ["/opt/doppel/node_modules", "/tmp/node_modules"]) {
+    try {
+      const url = pathToFileURL(base + "/" + pkg + (sub ? "/" + sub : "")).href;
+      return await import(url);
+    } catch {}
+  }
+  return null;
+}
+const browserPkg = await tryImport("@solarisdk/browser", "dist/index.js");
+const prPkg = await tryImport("patchright-core", "index.mjs");
+if (!browserPkg || !prPkg) {
+  console.error("[doppel-mcp] FATAL: SDK not resolvable (@solarisdk/browser=" + !!browserPkg + " patchright-core=" + !!prPkg + "). run.sh SDK-ensure block failed.");
+  process.exit(1);
+}
+const { Solari } = browserPkg;
+const { chromium } = prPkg;
+
 const apiKey = process.env.SOLARI_API_KEY || "";
 const client = new Solari({ apiKey, baseUrl: "https://api.getsolari.com" });
+// Single-attempt client for the stealth-first try: the gateway holds a
+// saturated stealth request ~60s before answering 503
+// ("No stealth pool available", fleet saturated), and retrying a saturated
+// pool is pointless — the caller falls back to a standard browser instead.
+const stealthClient = new Solari({ apiKey, baseUrl: "https://api.getsolari.com", maxAttempts: 1, timeoutMs: 75000 });
 const sessions = new Map();
 
 const send = (m) => process.stdout.write(JSON.stringify(m) + "\n");
@@ -93,7 +119,21 @@ async function toolCreate(a) {
   const body = { stealth: true, autoLogin: false };
   if (a.recording) body.recording = true;
   if (profileId) body.profileId = profileId;
-  const session = await client.sessions.create(body);
+  // Stealth fleet saturates (503 "No stealth pool available") while the
+  // standard pool stays healthy — try stealth once, fall back to standard.
+  let session = null;
+  let usedStealth = true;
+  try {
+    session = await stealthClient.sessions.create(body);
+  } catch (e) {
+    const msg = String((e && e.message) || e);
+    console.error("[doppel-mcp] stealth create failed, falling back to standard:", msg.slice(0, 200));
+    usedStealth = false;
+    const fallback = { autoLogin: false };
+    if (a.recording) fallback.recording = true;
+    if (profileId) fallback.profileId = profileId;
+    session = await client.sessions.create(fallback);
+  }
   const browser = await chromium.connect(session.wsEndpoint);
   const ctx = browser.contexts()[0] || (await browser.newContext());
   let applied = 0;
@@ -121,7 +161,7 @@ async function toolCreate(a) {
   const page = ctx.pages()[0] || (await ctx.newPage());
   sessions.set(session.id, { id: session.id, browser, ctx, page, recording: !!a.recording, profileId, applied });
   try { fs.appendFileSync("/tmp/browser_id.txt", session.id + "\n"); } catch {}
-  return { sessionId: session.id, mode: "stealth", profileId: profileId || null, profileApplied: applied > 0, cookiesApplied: applied, expiresAt: session.expiresAt };
+  return { sessionId: session.id, mode: usedStealth ? "stealth" : "standard (stealth pool saturated)", profileId: profileId || null, profileApplied: applied > 0, cookiesApplied: applied, expiresAt: session.expiresAt };
 }
 
 async function callTool(name, a) {
@@ -135,7 +175,18 @@ async function callTool(name, a) {
     case "solari_browser_key": { const e = getSession(a.sessionId); await e.page.keyboard.press(a.key); return { ok: true }; }
     case "solari_browser_evaluate": { const e = getSession(a.sessionId); const r = await e.page.evaluate(a.expression); return { result: r }; }
     case "solari_browser_close": { const e = sessions.get(a.sessionId); if (!e) return { ok: true, note: "already closed" }; await e.browser.close().catch(() => {}); await client.sessions.releaseAndWait(e.id).catch(() => {}); sessions.delete(a.sessionId); return { ok: true }; }
-    case "solari_browser_replay_url": { const r = await client.sessions.getReplayUrl(a.sessionId); try { fs.writeFileSync("/tmp/replay_url.txt", r.url); } catch {} return r; }
+    case "solari_browser_replay_url": {
+      // The replay is available ~1-3s after releaseAndWait — retry briefly.
+      let lastErr = null;
+      for (let i = 0; i < 5; i++) {
+        try {
+          const r = await client.sessions.getReplayUrl(a.sessionId);
+          try { fs.writeFileSync("/tmp/replay_url.txt", r.url); } catch {}
+          return r;
+        } catch (e) { lastErr = e; await new Promise((r2) => setTimeout(r2, 2000)); }
+      }
+      throw lastErr;
+    }
     default: throw new Error("unknown tool: " + name);
   }
 }
