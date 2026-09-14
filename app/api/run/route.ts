@@ -40,10 +40,12 @@ const { chromium } = prPkg;
 
 const apiKey = process.env.SOLARI_API_KEY || "";
 const client = new Solari({ apiKey, baseUrl: "https://api.getsolari.com" });
-// Single-attempt client for the stealth-first try: the gateway holds a
-// saturated stealth request ~60s before answering 503
-// ("No stealth pool available", fleet saturated), and retrying a saturated
-// pool is pointless — the caller falls back to a standard browser instead.
+// Bounded single-attempt clients. The gateway HOLDS a saturated stealth
+// request ~60s before answering 503 ("No stealth pool available"). A 60s+
+// tool call exceeds the MCP client timeout, so the model never gets the
+// sessionId, retries create, and leaks a blank gateway session per attempt.
+// Standard pool answers 201 in ~1s, so it goes first; stealth is fallback.
+const fastClient = new Solari({ apiKey, baseUrl: "https://api.getsolari.com", maxAttempts: 1, timeoutMs: 45000 });
 const stealthClient = new Solari({ apiKey, baseUrl: "https://api.getsolari.com", maxAttempts: 1, timeoutMs: 75000 });
 const sessions = new Map();
 
@@ -116,23 +118,20 @@ function getSession(id) {
 
 async function toolCreate(a) {
   const profileId = typeof a.profileId === "string" ? a.profileId : undefined;
-  const body = { stealth: true, autoLogin: false };
-  if (a.recording) body.recording = true;
-  if (profileId) body.profileId = profileId;
-  // Stealth fleet saturates (503 "No stealth pool available") while the
-  // standard pool stays healthy — try stealth once, fall back to standard.
+  // Standard pool first (answers 201 in ~1s, keeps the tool call inside the
+  // MCP client timeout). Stealth is a best-effort upgrade, never the default.
   let session = null;
-  let usedStealth = true;
+  let usedStealth = false;
+  const base = { autoLogin: false };
+  if (a.recording) base.recording = true;
+  if (profileId) base.profileId = profileId;
   try {
-    session = await stealthClient.sessions.create(body);
+    session = await fastClient.sessions.create(base);
   } catch (e) {
     const msg = String((e && e.message) || e);
-    console.error("[doppel-mcp] stealth create failed, falling back to standard:", msg.slice(0, 200));
-    usedStealth = false;
-    const fallback = { autoLogin: false };
-    if (a.recording) fallback.recording = true;
-    if (profileId) fallback.profileId = profileId;
-    session = await client.sessions.create(fallback);
+    console.error("[doppel-mcp] standard create failed, trying stealth:", msg.slice(0, 200));
+    session = await stealthClient.sessions.create({ ...base, stealth: true });
+    usedStealth = true;
   }
   const browser = await chromium.connect(session.wsEndpoint);
   const ctx = browser.contexts()[0] || (await browser.newContext());
@@ -161,7 +160,7 @@ async function toolCreate(a) {
   const page = ctx.pages()[0] || (await ctx.newPage());
   sessions.set(session.id, { id: session.id, browser, ctx, page, recording: !!a.recording, profileId, applied });
   try { fs.appendFileSync("/tmp/browser_id.txt", session.id + "\n"); } catch {}
-  return { sessionId: session.id, mode: usedStealth ? "stealth" : "standard (stealth pool saturated)", profileId: profileId || null, profileApplied: applied > 0, cookiesApplied: applied, expiresAt: session.expiresAt };
+  return { sessionId: session.id, mode: usedStealth ? "stealth" : "standard", profileId: profileId || null, profileApplied: applied > 0, cookiesApplied: applied, expiresAt: session.expiresAt };
 }
 
 async function callTool(name, a) {
