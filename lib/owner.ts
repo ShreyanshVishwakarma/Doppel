@@ -1,11 +1,10 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
 
 /**
- * Access control while the product is invite-only.
+ * Access control for the app.
  *
- * Two ways in:
- *  - the owner allowlist (OWNER_EMAILS, comma-separated), or
- *  - an approved waitlist email (granted from Settings > Access, stored in Convex).
+ * The app is open: any signed-in user may use it. Ownership (OWNER_EMAILS) only
+ * gates the admin surfaces, such as the waitlist admin endpoints.
  */
 
 export function ownerEmails(): string[] {
@@ -26,44 +25,11 @@ export async function getEmailForUser(userId: string): Promise<string | null> {
   }
 }
 
-async function isApprovedOnWaitlist(email: string): Promise<boolean> {
-  const url = process.env.NEXT_PUBLIC_CONVEX_URL;
-  const secret = process.env.SANDBOX_HARNESS_SECRET;
-  if (!url || !secret) return false;
-  try {
-    const res = await fetch(`${url}/api/query`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: "waitlist:isAllowed", args: { email, secret }, format: "json" }),
-      signal: AbortSignal.timeout(4000),
-    });
-    if (!res.ok) return false;
-    const data = (await res.json()) as { value?: unknown };
-    return data.value === true;
-  } catch {
-    return false;
-  }
-}
-
-/** Owner, or an email the owner approved from the waitlist. */
-export async function isEmailAllowed(email: string | null): Promise<boolean> {
-  if (!email) return false;
-  const normalized = email.trim().toLowerCase();
-  if (ownerEmails().includes(normalized)) return true;
-  return isApprovedOnWaitlist(normalized);
-}
-
 export async function getOwnerStatus(): Promise<{ isOwner: boolean; email: string | null; userId: string | null }> {
   const { userId } = await auth();
   if (!userId) return { isOwner: false, email: null, userId: null };
   const email = await getEmailForUser(userId);
   return { isOwner: !!email && ownerEmails().includes(email), email, userId };
-}
-
-export async function getAccessStatus(): Promise<{ isOwner: boolean; isAllowed: boolean; email: string | null; userId: string | null }> {
-  const owner = await getOwnerStatus();
-  const isAllowed = owner.isOwner || (await isEmailAllowed(owner.email));
-  return { isOwner: owner.isOwner, isAllowed, email: owner.email, userId: owner.userId };
 }
 
 /** 403 Response unless the caller is the owner. */
@@ -75,13 +41,13 @@ export async function requireOwner(): Promise<Response | { isOwner: true; email:
   return { isOwner: true, email: status.email, userId: status.userId };
 }
 
-/** 403 Response unless the caller is the owner or an approved waitlist user. */
-export async function requireAccess(): Promise<Response | { isOwner: boolean; email: string; userId: string }> {
-  const status = await getAccessStatus();
-  if (!status.isAllowed || !status.email || !status.userId) {
-    return Response.json({ error: "This product is private. Join the waitlist at the homepage" }, { status: 403 });
+/** 401 Response unless the caller is signed in. */
+export async function requireAccess(): Promise<Response | { userId: string }> {
+  const { userId } = await auth();
+  if (!userId) {
+    return Response.json({ error: "Authentication required" }, { status: 401 });
   }
-  return { isOwner: status.isOwner, email: status.email, userId: status.userId };
+  return { userId };
 }
 
 export function isResponse(v: unknown): v is Response {

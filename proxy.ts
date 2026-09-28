@@ -1,6 +1,5 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
-import { getEmailForUser, isEmailAllowed } from "./lib/owner";
 
 const isPublicRoute = createRouteMatcher([
   "/",
@@ -15,8 +14,8 @@ const isPublicRoute = createRouteMatcher([
   "/favicon.ico",
 ]);
 
-// Invite-only: the owner and any waitlist email they approved may open the app.
-// Everyone else, signed in or not, is bounced to the landing page.
+// The app is open to anyone with an account: a signed-in user may open the app,
+// anyone else is bounced to the landing page.
 const isPrivateAppRoute = createRouteMatcher(["/dashboard(.*)", "/settings(.*)", "/onboarding(.*)"]);
 
 export default clerkMiddleware(async (auth, req) => {
@@ -26,10 +25,6 @@ export default clerkMiddleware(async (auth, req) => {
     const { userId } = await auth();
     if (!userId) {
       return NextResponse.redirect(new URL("/", req.url));
-    }
-    const email = await getEmailForUser(userId);
-    if (!(await isEmailAllowed(email))) {
-      return NextResponse.redirect(new URL("/?waitlisted=1", req.url));
     }
   }
   if (!isPublicRoute(req) && !isPrivateAppRoute(req)) {

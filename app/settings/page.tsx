@@ -10,7 +10,7 @@ import { api } from "../../convex/_generated/api";
 
 type Links = { linkedin: string; github: string; twitter: string; portfolio: string };
 type Preferences = { tone: string; targetRoles: string; locations: string; emailVolume: string };
-type Tab = "logins" | "profile" | "markdown" | "access";
+type Tab = "logins" | "profile" | "markdown";
 
 const PLATFORMS = [
   { id: "gmail", label: "Gmail", domain: "mail.google.com", desc: "Inbox triage, draft replies, approve to send. Needs Google login.", icon: "✉" },
@@ -48,11 +48,6 @@ export default function SettingsPage() {
   const [profilesMsg, setProfilesMsg] = useState<string | null>(null);
   const [loginInfo, setLoginInfo] = useState<{ platform: string; url: string; sinceVersion: number | null; saved: boolean } | null>(null);
   const [solariList, setSolariList] = useState<Array<{ id: string; name: string; editorStatus?: string; editorError?: string }> | null>(null);
-  const [isOwner, setIsOwner] = useState(false);
-  const [accessEntries, setAccessEntries] = useState<Array<{ email: string; status: string; createdAt: number }> | null>(null);
-  const [accessMsg, setAccessMsg] = useState<string | null>(null);
-  const [newEmail, setNewEmail] = useState("");
-  const [accessBusy, setAccessBusy] = useState<string | null>(null);
 
   useEffect(() => {
     if (!profile) return;
@@ -67,37 +62,6 @@ export default function SettingsPage() {
     if (!isAuthenticated) return;
     fetch("/api/profiles").then(r=>r.json()).then(d=>{ setSolariList(d.solariProfiles ?? d.solarProfiles ?? []); }).catch(()=>{});
   }, [isAuthenticated, browserProfiles]);
-
-  useEffect(() => {
-    if (!isAuthenticated) return;
-    fetch("/api/me").then((r) => r.json()).then((d) => setIsOwner(!!d.owner)).catch(() => {});
-  }, [isAuthenticated]);
-
-  useEffect(() => {
-    if (!isOwner) return;
-    fetch("/api/admin/waitlist").then((r) => r.json()).then((d) => setAccessEntries(d.entries ?? [])).catch(() => setAccessEntries([]));
-  }, [isOwner]);
-
-  async function setAccess(email: string, status: "approved" | "pending") {
-    setAccessBusy(email);
-    setAccessMsg(null);
-    try {
-      const res = await fetch("/api/admin/waitlist", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, status }) });
-      const d = await res.json();
-      if (!res.ok) throw new Error(d.error ?? "Failed");
-      setAccessEntries((prev) => {
-        const list = prev ?? [];
-        if (!list.some((e) => e.email === email)) return [{ email, status, createdAt: Date.now() }, ...list];
-        return list.map((e) => (e.email === email ? { ...e, status } : e));
-      });
-      setAccessMsg(status === "approved" ? `Access granted to ${email}` : `Access revoked for ${email}`);
-      setNewEmail("");
-    } catch (e) {
-      setAccessMsg(e instanceof Error ? e.message : "Failed");
-    } finally {
-      setAccessBusy(null);
-    }
-  }
 
   // Poll until the handoff's profile version bumps — that IS the save confirmation.
   useEffect(() => {
@@ -135,7 +99,6 @@ export default function SettingsPage() {
   const role = profile?.role ?? "student";
   const markdownPreview = `# ${user?.fullName ?? "Profile"} — ${role} Context\n\n## Bio\n${bio}\n\n## Links\n- LinkedIn: ${links.linkedin || "—"}\n- GitHub: ${links.github || "—"}\n- X: ${links.twitter || "—"}\n- Portfolio: ${links.portfolio || "—"}\n\n## Preferences\n- Tone: ${prefs.tone}\n- Roles: ${prefs.targetRoles || "—"}\n- Locations: ${prefs.locations || "—"}\n`;
   const connectedCount = (browserProfiles ?? []).filter((b) => b.status === "active").length;
-  const tabs: Array<{ id: Tab; label: string }> = isOwner ? [...TABS, { id: "access", label: "Access" }] : TABS;
 
   async function handleSave() {
     if (!profile) { setMsg("No profile"); return; }
@@ -242,7 +205,7 @@ export default function SettingsPage() {
 
         {/* tabs */}
         <div className="mt-6 flex gap-1 rounded-xl border border-stone-200 bg-white p-1">
-          {tabs.map((t) => (
+          {TABS.map((t) => (
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
@@ -463,53 +426,6 @@ export default function SettingsPage() {
                 </button>
               </div>
               {msg && <div className={`mt-2 rounded-lg border px-3 py-2 text-xs font-medium ${msg.startsWith("Saved") ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-red-200 bg-red-50 text-red-700"}`}>{msg}</div>}
-            </div>
-          </div>
-        )}
-        {/* ============ TAB: ACCESS (owner only) ============ */}
-        {tab === "access" && isOwner && (
-          <div className="mt-6 space-y-4">
-            <div className="rounded-xl border border-stone-200 bg-white p-5">
-              <h2 className="text-sm font-semibold text-stone-900">Give someone access</h2>
-              <p className="mt-0.5 text-xs leading-5 text-stone-500">Approving an email lets that account open the dashboard and run tasks. Revoking takes it back. It applies as soon as they sign in.</p>
-              <form
-                onSubmit={(e) => { e.preventDefault(); if (newEmail.trim()) setAccess(newEmail.trim().toLowerCase(), "approved"); }}
-                className="mt-3 flex items-center gap-2"
-              >
-                <input value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="teammate@company.com" className={inputCls} />
-                <button type="submit" disabled={!newEmail.trim() || accessBusy === newEmail.trim().toLowerCase()} className="shrink-0 rounded-full bg-stone-900 px-4 py-2 text-xs font-semibold text-white transition hover:bg-black active:scale-[0.98] disabled:opacity-40">
-                  Grant access
-                </button>
-              </form>
-              {accessMsg && <div className="mt-2 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-xs font-medium text-stone-700">{accessMsg}</div>}
-            </div>
-
-            <div className="rounded-xl border border-stone-200 bg-white">
-              <div className="flex items-center justify-between px-5 py-4">
-                <h2 className="text-sm font-semibold text-stone-900">Waitlist</h2>
-                <span className="tnum rounded-full border border-stone-200 bg-stone-100 px-2 py-0.5 text-[11px] font-medium text-stone-600">{accessEntries?.length ?? 0}</span>
-              </div>
-              <div className="border-t border-stone-200">
-                {accessEntries === null ? (
-                  <div className="px-5 py-6 text-xs text-stone-500">Loading…</div>
-                ) : accessEntries.length === 0 ? (
-                  <div className="px-5 py-6 text-xs text-stone-500">No one has joined the waitlist yet.</div>
-                ) : (
-                  accessEntries.map((e) => (
-                    <div key={e.email} className="flex flex-wrap items-center gap-2 border-b border-stone-100 px-5 py-3 last:border-b-0">
-                      <span className="min-w-0 flex-1 truncate text-sm font-medium text-stone-900">{e.email}</span>
-                      <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${e.status === "approved" ? "border-emerald-200 bg-emerald-100 text-emerald-700" : "border-stone-200 bg-stone-100 text-stone-600"}`}>{e.status}</span>
-                      <button
-                        onClick={() => setAccess(e.email, e.status === "approved" ? "pending" : "approved")}
-                        disabled={accessBusy === e.email}
-                        className={`rounded-full px-3 py-1 text-xs font-semibold transition active:scale-[0.98] disabled:opacity-40 ${e.status === "approved" ? "border border-stone-300 bg-white text-stone-700 hover:bg-stone-50" : "bg-stone-900 text-white hover:bg-black"}`}
-                      >
-                        {accessBusy === e.email ? "…" : e.status === "approved" ? "Revoke" : "Approve"}
-                      </button>
-                    </div>
-                  ))
-                )}
-              </div>
             </div>
           </div>
         )}

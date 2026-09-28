@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { Show, SignInButton, SignUpButton, UserButton } from "@clerk/nextjs";
 import { OpenDoppelCta } from "@/components/open-doppel-cta";
-import { WaitlistForm } from "@/components/waitlist-form";
 
 function ArrowRight() {
   return (
@@ -18,7 +17,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "What does it cost?",
-    a: "Doppel is free during the private beta. Browser sessions run on metered cloud infrastructure, so heavy usage may become a paid tier later. You'll always know before a task runs.",
+    a: "Doppel is free during the beta. Browser sessions run on metered cloud infrastructure, so heavy usage may become a paid tier later. You'll always know before a task runs.",
   },
   {
     q: "Do you see my passwords?",
@@ -61,9 +60,11 @@ export default function Home() {
               <SignInButton mode="modal">
                 <button className="hidden text-sm font-medium text-stone-600 transition hover:text-stone-900 sm:inline">Sign in</button>
               </SignInButton>
-              <a href="#waitlist" className="inline-flex h-9 items-center justify-center rounded-full bg-stone-900 px-5 text-sm font-medium text-white transition hover:bg-stone-800 active:scale-[0.98]">
-                Join Private Beta
-              </a>
+              <SignUpButton mode="modal">
+                <button className="inline-flex h-9 items-center justify-center rounded-full bg-stone-900 px-5 text-sm font-medium text-white transition hover:bg-stone-800 active:scale-[0.98]">
+                  Get started
+                </button>
+              </SignUpButton>
             </Show>
             <Show when="signed-in">
               <OpenDoppelCta />
@@ -81,7 +82,7 @@ export default function Home() {
           <div className="flex flex-col justify-center">
             <div className="inline-flex w-fit items-center gap-2 rounded-full border border-stone-200 bg-stone-50 px-3 py-1 text-xs font-medium text-stone-600">
               <span className="h-2 w-2 rounded-full bg-stone-400" />
-              Private beta now open. Invites go out weekly.
+              Open beta. Create an account and start automating.
             </div>
 
             <h1 className="mt-6 text-[38px] font-[650] leading-[0.98] tracking-[-0.04em] [text-wrap:balance] sm:text-[52px]">
@@ -97,12 +98,9 @@ export default function Home() {
 
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <Show when="signed-out">
-                <a href="#waitlist" className="inline-flex h-11 items-center gap-2 rounded-full bg-stone-900 px-6 text-sm font-medium text-white shadow-sm transition hover:bg-black active:scale-[0.98]">
-                  Start Automating Free <ArrowRight />
-                </a>
                 <SignUpButton mode="modal">
-                  <button className="inline-flex h-11 items-center justify-center rounded-full border border-stone-200 bg-white px-6 text-sm font-medium transition hover:bg-stone-50 active:scale-[0.98]">
-                    Create account
+                  <button className="inline-flex h-11 items-center gap-2 rounded-full bg-stone-900 px-6 text-sm font-medium text-white shadow-sm transition hover:bg-black active:scale-[0.98]">
+                    Start Automating Free <ArrowRight />
                   </button>
                 </SignUpButton>
               </Show>
@@ -112,15 +110,8 @@ export default function Home() {
             </div>
 
             <p className="mt-3 text-xs leading-5 text-stone-500">
-              Free during private beta • No credit card required • 30-second setup
+              Free during beta • No credit card required • 30-second setup
             </p>
-
-            <Show when="signed-out">
-              <div className="mt-6 w-full max-w-md">
-                <WaitlistForm compact />
-                <p className="mt-2 text-xs text-stone-500">Have an invite? <SignInButton mode="modal"><button className="font-medium underline underline-offset-2 hover:text-stone-900">Sign in</button></SignInButton></p>
-              </div>
-            </Show>
 
             <p className="mt-6 max-w-[48ch] text-xs leading-5 text-stone-500">
               You say: <span className="font-mono text-stone-700">“check my email”</span> or{" "}
@@ -295,8 +286,8 @@ export default function Home() {
         </div>
       </section>
 
-      {/* FINAL CTA + WAITLIST */}
-      <section id="waitlist" className="mx-auto w-full max-w-6xl px-6 py-20">
+      {/* FINAL CTA */}
+      <section id="get-started" className="mx-auto w-full max-w-6xl px-6 py-20">
         <div className="relative overflow-hidden rounded-[24px] border border-stone-900 bg-stone-900 p-8 text-center sm:p-12">
           <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,0.04)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.04)_1px,transparent_1px)] bg-[size:32px_32px]" />
           <div className="relative mx-auto max-w-xl">
@@ -304,12 +295,9 @@ export default function Home() {
               Your next batch of outreach runs itself.
             </h2>
             <p className="mt-3 text-[15px] leading-6 text-stone-300">
-              Join the private beta and be first in line, or create an account and start automating right now.
+              Create an account and start automating right now. No invite needed.
             </p>
-            <div className="mx-auto mt-7 max-w-md">
-              <WaitlistForm />
-            </div>
-            <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
+            <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
               <Show when="signed-out">
                 <SignUpButton mode="modal">
                   <button className="inline-flex h-10 items-center gap-2 rounded-full bg-white px-5 text-sm font-semibold text-stone-900 transition hover:bg-stone-100 active:scale-[0.98]">
@@ -321,7 +309,7 @@ export default function Home() {
                 <OpenDoppelCta doneLabel="Open Doppel" newLabel="Start onboarding, 2 min" />
               </Show>
             </div>
-            <p className="mt-4 text-xs text-stone-400">Free during private beta • No credit card required • Stop any task anytime</p>
+            <p className="mt-4 text-xs text-stone-400">Free during beta • No credit card required • Stop any task anytime</p>
           </div>
         </div>
       </section>
@@ -329,7 +317,7 @@ export default function Home() {
       <footer className="mx-auto w-full max-w-6xl px-6 pb-8 text-xs leading-6 text-stone-500">
         <div className="flex flex-col justify-between gap-4 border-t border-stone-200 pt-6 sm:flex-row">
           <span>© {new Date().getFullYear()} Doppel. Not a replacement. A professional doppelgänger you explicitly command.</span>
-          <span>You approve every capability you enable. Automate responsibly and within each platform's terms.</span>
+          <span>You approve every capability you enable. Automate responsibly and within each platform&apos;s terms.</span>
         </div>
       </footer>
     </div>
