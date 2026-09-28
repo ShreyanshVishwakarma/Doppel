@@ -34,7 +34,7 @@ console.log("connected");
 try{
   const opencodeConfig = {
     "$schema": "https://opencode.ai/config.json",
-    "model": "opencode/mimo-v2.5-free",
+    "model": "opencode/muse-spark-1.3-contributor-free",
     "mcp": {
       "solari": {
         "type": "local",
@@ -92,10 +92,10 @@ When the task involves Gmail, LinkedIn, Twitter, GitHub, or any site requiring l
 
   // Dry-run opencode with free model - should produce hello without needing gateway key
   console.log("Dry-run opencode run with mimo model...");
-  r=await retry(()=>sbx.commands.run("sh",{args:["-c","export HOME=/root; export PATH=/root/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH; export SOLARI_API_KEY='"+apiKey+"'; timeout 40 opencode run -m opencode/mimo-v2.5-free \"hello, how are you today? Reply in one short sentence.\" 2>&1 | head -n 120; echo VERIFY_EXIT:$?"],timeoutMs:60000}));
+  r=await retry(()=>sbx.commands.run("sh",{args:["-c","export HOME=/root; export PATH=/root/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH; export SOLARI_API_KEY='"+apiKey+"'; timeout 40 opencode run -m opencode/muse-spark-1.3-contributor-free \"hello, how are you today? Reply in one short sentence.\" 2>&1 | head -n 120; echo VERIFY_EXIT:$?"],timeoutMs:60000}));
   console.log(r.stdout.slice(0,4000), "exit", r.exitCode);
   // Also test the exact user failing command but with correct model flag (should not say agent not found)
-  r=await retry(()=>sbx.commands.run("sh",{args:["-c","export HOME=/root; timeout 40 opencode run -m opencode/mimo-v2.5-free \"hello, how are you today?\" 2>&1 | head -n 120; echo EXIT2:$?"],timeoutMs:60000}));
+  r=await retry(()=>sbx.commands.run("sh",{args:["-c","export HOME=/root; timeout 40 opencode run -m opencode/muse-spark-1.3-contributor-free \"hello, how are you today?\" 2>&1 | head -n 120; echo EXIT2:$?"],timeoutMs:60000}));
   console.log("second dry", r.stdout.slice(0,3000));
 
   console.log("Snapshotting as v2...");

@@ -92,7 +92,7 @@ mkdir -p "$HOME/.config/opencode"
 cat > "$HOME/.config/opencode/opencode.json" << 'EOJ'
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "opencode/mimo-v2.5-free",
+  "model": "opencode/muse-spark-1.3-contributor-free",
   "mcp": {
     "solari": {
       "type": "local",
@@ -146,7 +146,7 @@ opencode agent list 2>&1 | head -30
   // Do it explicitly via files.write
   const opencodeConfig = {
     "$schema": "https://opencode.ai/config.json",
-    "model": "opencode/mimo-v2.5-free",
+    "model": "opencode/muse-spark-1.3-contributor-free",
     "mcp": {
       "solari": {
         "type": "local",
@@ -204,9 +204,9 @@ echo "--- verify: opencode mcp list ---"
 timeout 10 opencode mcp list 2>&1 | head -40
 echo "--- verify: opencode run dry (no browser needed, just LLM hello) ---"
 # Use opencode's free model mimo-v2.5-free - should work without external API key
-timeout 40 opencode run -m opencode/mimo-v2.5-free "hello, how are you today? Reply in one short sentence." 2>&1 | head -n 100; echo VERIFY_EXIT:$?
+timeout 40 opencode run -m opencode/muse-spark-1.3-contributor-free "hello, how are you today? Reply in one short sentence." 2>&1 | head -n 100; echo VERIFY_EXIT:$?
 echo "--- verify: --agent fallback behavior (user's example) ---"
-timeout 40 opencode run --agent build -m opencode/mimo-v2.5-free "hello, how are you today?" 2>&1 | head -n 100; echo AGENT_EXIT:$?
+timeout 40 opencode run --agent build -m opencode/muse-spark-1.3-contributor-free "hello, how are you today?" 2>&1 | head -n 100; echo AGENT_EXIT:$?
 `],
     timeoutMs: 120_000,
   });

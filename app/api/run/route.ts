@@ -480,10 +480,24 @@ fi
 if [ -d /opt/doppel/node_modules/patchright-core ] && [ ! -d /tmp/node_modules/patchright-core ]; then
   cp -r /opt/doppel/node_modules/patchright-core /tmp/node_modules/ 2>/dev/null || true
 fi
+# opencode retires/renames its free models without notice (mimo-v2.5-free was
+# removed and broke every run with ProviderModelNotFoundError). Resolve to a
+# model that exists right now, preferring known-good free ones, then fall back
+# to any free model opencode advertises.
+MODEL=""
+for m in opencode/muse-spark-1.3-contributor-free opencode/nemotron-3.5-lightning-free opencode/mimo-v2.6-flash-free; do
+  if opencode models 2>/dev/null | grep -qx "$m"; then MODEL="$m"; break; fi
+done
+if [ -z "$MODEL" ]; then
+  MODEL=$(opencode models 2>/dev/null | grep -E '^opencode/[A-Za-z0-9._-]*free$' | head -n 1)
+fi
+[ -z "$MODEL" ] && MODEL="opencode/muse-spark-1.3-contributor-free"
+echo "$MODEL" > /tmp/model.txt
+echo "resolved opencode model: $MODEL"
 cat > /root/.config/opencode/opencode.json << EOJ
 {
   "\$schema": "https://opencode.ai/config.json",
-  "model": "opencode/mimo-v2.5-free",
+  "model": "$MODEL",
   "mcp": {
     "solari": {
       "type": "local",
@@ -503,10 +517,10 @@ echo "opencode config rewritten to fixed MCP:"
 cat /root/.config/opencode/opencode.json
 # ---- opencode harness — context-aware AI assistant (primary) ----
 # Runs inside Solari Sandbox via MCP: Solari browser + Gmail/LinkedIn profiles + markdown context
-# Uses baked snapshot model opencode/mimo-v2.5-free (free, no external key needed) + Solari MCP solari_browser_*
+# Uses a free opencode model resolved at runtime (no external key needed) + Solari MCP solari_browser_*
 set +e
 OPENCODE_EXIT=99
-trace "ACTION" "Spawning opencode harness with Solari MCP (browser + profiles) — LLM will use full markdown context (mimo-v2.5-free) via PTY"
+trace "ACTION" "Spawning opencode harness with Solari MCP (browser + profiles) — LLM $(cat /tmp/model.txt 2>/dev/null) via PTY"
 cat > /tmp/inner.sh << 'INNEREOF'
 #!/bin/sh
 set -e
@@ -544,7 +558,7 @@ if (ids.length > 0) {
 fs.writeFileSync('/tmp/profile_instruction.txt', out);
 " 2>/dev/null || echo '(No browser profiles configured for this task)' > /tmp/profile_instruction.txt
 
-opencode run --auto -m opencode/mimo-v2.5-free "$(cat /tmp/task.txt)
+opencode run --auto -m "$(cat /tmp/model.txt)" "$(cat /tmp/task.txt)
 
 --- User profile markdown (entire file, follow cold outreach instructions exactly):
 $(cat /tmp/prompt.md)
@@ -609,6 +623,8 @@ if [ ! -f /tmp/result.json ]; then
       const fs=require('fs');
       const txt=fs.readFileSync('/tmp/opencode.out','utf8');
       const lines=txt.split('\n').map(l=>l.replace(/\r/g,'').trim()).filter(Boolean);
+      // fatal LLM/harness errors must never be reported as success
+      const fatal = /ProviderModelNotFoundError|Model not found|Unexpected server error|UnknownError/i.test(txt);
       // strong needsAuth signals only (page text often contains the words 'sign in')
       const strongAuth = /sign in to continue|accounts\.google\.com|choose an account|enter your email|email or phone/i.test(txt);
       // assistant's final prose = lines that are not tool calls, script boilerplate, or TUI chrome
@@ -616,7 +632,11 @@ if [ ! -f /tmp/result.json ]; then
       const tail = prose.slice(-14).join('\n').slice(0, 1500);
       const m = txt.match(/https:\/\/console\.getsolari\.com\/profiles\/([a-z0-9]+)\/edit/);
       let out;
-      if (strongAuth) {
+      if (fatal) {
+        const dm = txt.match(/Model not found:.*/i) || txt.match(/Unexpected server error.*/i);
+        const hint = /Model not found/i.test(txt) ? ' (the free model was retired; update the model list in the harness)' : '';
+        out = { status:'failed', error:'Harness LLM error: ' + (dm ? dm[0].slice(0,220) : 'opencode failed to start') + hint, opencodeOutput: txt.slice(0,4000) };
+      } else if (strongAuth) {
         out = { status:'needsAuth', needsAuth: /gmail|mail\.google/i.test(txt) ? 'gmail' : 'profile', profileId: m ? m[1] : undefined, loginUrl: m ? m[0] : undefined, hint:'Profile cookies expired — user should click Log in in Settings and re-save', opencodeOutput: txt.slice(0,3000) };
       } else if (tail.length > 60) {
         out = { status:'completed', conclusion: tail };

@@ -37,9 +37,11 @@ export function decideFinal(resultJson: string): { status: "completed" | "paused
     if (typeof j.needsAuth === "string" && j.needsAuth) return { status: "paused", errorMessage: `Login required for ${j.needsAuth} — connect profile in Settings` };
     if (typeof j.needsInput === "string" && j.needsInput) return { status: "paused", errorMessage: j.needsInput };
     if (j.status === "failed") return { status: "failed", errorMessage: typeof j.error === "string" ? j.error.slice(0, 800) : "Harness reported failure" };
+    // An error envelope with no explicit status is a failure, not a success.
+    if (typeof j.name === "string" && /Error$/.test(j.name)) return { status: "failed", errorMessage: `Harness error: ${j.name}` };
     return { status: "completed" };
   } catch {
-    return { status: "completed" };
+    return { status: "failed", errorMessage: "Unreadable harness result — the run did not finish cleanly" };
   }
 }
 
